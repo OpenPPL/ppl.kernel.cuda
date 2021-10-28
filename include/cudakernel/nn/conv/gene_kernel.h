@@ -15,16 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PPLCUDA_KERNEL_INCLUDE_NOT_NOT_H_
-#define PPLCUDA_KERNEL_INCLUDE_NOT_NOT_H_
-#include "ppl/nn/common/tensor_shape.h"
+#ifndef __PPLCUDA_CONV_GENE_KERNEL_H_
+#define __PPLCUDA_CONV_GENE_KERNEL_H_
+
+#include <string>
+
+#include "ppl/common/types.h"
 #include "ppl/common/retcode.h"
+#include "cudakernel/nn/conv/conv_fp16.h"
 
-ppl::common::RetCode PPLCUDANotForwardImp(
-    cudaStream_t stream,
-    const ppl::nn::TensorShape* input_shape,
-    const bool* input,
-    const ppl::nn::TensorShape* output_shape,
-    bool* output);
+ppl::common::RetCode Gene2spkKernel(std::string& file_res, std::string& kname, int cta_y, int cta_x, int warp_y, int warp_x, int k_size, int s_size, int splitk, int splitf, int buf_size, int declare_times);
+ppl::common::RetCode GeneIdxnKernel(std::string& file_res, std::string& kname, int cta_y, int cta_x, int warp_y, int warp_x, int k_size, int s_size, int declare_times);
+ppl::common::RetCode ReplaceFusionFor2spk(std::string& file_res, fuse_info_t fuse_info);
+ppl::common::RetCode ReplaceFusionForIdxn(std::string& file_res, fuse_info_t fuse_info);
 
-#endif // PPLCUDA_KERNEL_INCLUDE_NOT_NOT_H_
+#endif

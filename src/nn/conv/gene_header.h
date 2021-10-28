@@ -15,16 +15,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PPLCUDA_KERNEL_INCLUDE_NOT_NOT_H_
-#define PPLCUDA_KERNEL_INCLUDE_NOT_NOT_H_
-#include "ppl/nn/common/tensor_shape.h"
+#ifndef __PPLCUDA_CONV_GENE_HEADER_H_
+#define __PPLCUDA_CONV_GENE_HEADER_H_
+
+#include <string>
+#include <map>
 #include "ppl/common/retcode.h"
 
-ppl::common::RetCode PPLCUDANotForwardImp(
-    cudaStream_t stream,
-    const ppl::nn::TensorShape* input_shape,
-    const bool* input,
-    const ppl::nn::TensorShape* output_shape,
-    bool* output);
+class GeneHeader {
+public:
+    static GeneHeader* Instance()
+    {
+        static GeneHeader mgr;
+        return &mgr;
+    }
 
-#endif // PPLCUDA_KERNEL_INCLUDE_NOT_NOT_H_
+    std::string Find(const std::string& path);
+
+private:
+    std::map<std::string, std::string> header_code_;
+
+private:
+    GeneHeader();
+    void InitIncludeFile(std::string path);
+};
+
+#endif
