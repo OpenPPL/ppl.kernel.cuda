@@ -15,30 +15,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PPLCUDA_KERNEL_INCLUDE_MMCV_ROIALIGN_ROIALIGN_H_
-#define PPLCUDA_KERNEL_INCLUDE_MMCV_ROIALIGN_ROIALIGN_H_
-#include "ppl/common/tensor_shape.h"
-#include "ppl/common/retcode.h"
-#include <cuda_fp16.h>
-#include <float.h>
-#include <string>
+#ifndef PPLCUDA_COMMON_COMMON_PARAM_H_
+#define PPLCUDA_COMMON_COMMON_PARAM_H_
+#include <stdint.h>
+#include <vector>
+#include "ppl/common/types.h"
 
-struct MMCVRoiAlignKernelParam final {
-    int64_t aligned;
-    int64_t aligned_height;
-    int64_t aligned_width;
-    std::string pool_mode;
-    int64_t sampling_ratio;
-    float spatial_scale;
+struct QuantKernelParamCuda {
+    QuantKernelParamCuda(int i_z = 0, int o_z = 0, float i_s = 1.f, float o_s = 1.f) :
+        i_zero_point(i_z), o_zero_point(o_z), i_step(i_s), o_step(o_s) {}
+    int i_zero_point = 0;
+    int o_zero_point = 0;
+    float i_step = 1.0f;
+    float o_step = 1.0f;
 };
 
-ppl::common::RetCode PPLCUDAMMCVROIAlignForwardImp(
-    cudaStream_t stream,
-    ppl::common::TensorShape* input_shape,
-    const void* input,
-    ppl::common::TensorShape* rois_shape,
-    const void* rois,
-    ppl::common::TensorShape* output_shape,
-    void* output,
-    MMCVRoiAlignKernelParam param);
-#endif // PPLCUDA_KERNEL_INCLUDE_MMCV_ROIALIGN_ROIALIGN_H_
+struct CudaTensorKernelQuant {
+    ppl::common::dataformat_t format = ppl::common::DATAFORMAT_UNKNOWN;
+    ppl::common::datatype_t type = ppl::common::DATATYPE_UNKNOWN;
+    bool per_channel = false;
+    uint32_t bit_width = 0;
+    std::vector<float> scale{0.1f};
+    std::vector<float> zero_point{0.0f};
+};
+#endif
