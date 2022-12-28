@@ -1,0 +1,11 @@
+.vscode
+.DS_Store
+build
+deps
+target
+install
+cuda-build
+pplnn-build
+cuda-debug
+cuda-release
+html
