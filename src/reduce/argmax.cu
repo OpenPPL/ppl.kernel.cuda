@@ -16,7 +16,6 @@
 // under the License.
 
 #include "cudakernel/reduce/argmax.h"
-#include "cudakernel/common/common.h"
 #include "cudakernel/reduce/reduce_kernel.h"
 
 template <typename T>
@@ -74,7 +73,7 @@ ppl::common::RetCode PPLCUDAArgMaxForwardImp(
     void* output)
 {
     dim3 block_dim(32, BLOCKSIZE / 32);
-    dim3 grid_dim(DivUp(BLOCKSIZE, des.n_outer * des.n_inner), 1);
+    dim3 grid_dim(DivUpPassive(BLOCKSIZE, des.n_outer * des.n_inner), 1);
 
     if (input_shape->GetDataType() == ppl::common::DATATYPE_FLOAT16) {
         ppl_argmax<half><<<grid_dim, block_dim, 0, stream>>>(des, (const half*)input, (int64_t*)output);

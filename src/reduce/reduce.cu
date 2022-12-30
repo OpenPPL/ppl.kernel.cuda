@@ -17,7 +17,6 @@
 
 #include "cudakernel/reduce/reduce.h"
 #include "cudakernel/reduce/reduce_kernel.h"
-#include "cudakernel/common/common.h"
 #include "../reformat/cvt_int8_float.cuh"
 
 __global__ void CudaSetInitVal(
@@ -72,7 +71,7 @@ void SetInitVal(
     int64_t size)
 {
     dim3 blockDim(32, 32);
-    dim3 gridDim(DivUp(32 * 32, size));
+    dim3 gridDim(DivUpPassive(32 * 32, size));
     CudaSetInitVal<<<gridDim, blockDim>>>((T *)output, initval, size);
     cudaDeviceSynchronize();
 }
