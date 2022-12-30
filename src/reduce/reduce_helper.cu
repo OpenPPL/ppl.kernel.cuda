@@ -16,7 +16,6 @@
 // under the License.
 
 #include "cudakernel/reduce/reduce_helper.h"
-#include "cudakernel/common/common.h"
 #include "cudakernel/reduce/reduce.h"
 
 ReduceMode pplGetReduceMode(PPLReduceDimDes des)
@@ -38,7 +37,7 @@ void pplGetSplitNum(
 {
     while (bx * by < LEASTBLOCKNUM && block_reduce > BLOCKSIZE) {
         by <<= 1;
-        block_reduce = DivUp(2, block_reduce);
+        block_reduce = DivUpPassive(2, block_reduce);
     }
     split_num   = by;
     multi_block = !(split_num == 1);
@@ -51,18 +50,18 @@ std::pair<dim3, dim3> ComputeReduceRowConfigure(
     bool& multi_block,
     PPLReduceDimDes& des)
 {
-    dim3 block_dim(32, BLOCKSIZE / 32), grid_dim(DivUp(BLOCKSIZE, des.n_outer), 1);
+    dim3 block_dim(32, BLOCKSIZE / 32), grid_dim(DivUpPassive(BLOCKSIZE, des.n_outer), 1);
     if (des.n_reduce < 32)
         return {block_dim, grid_dim};
     if (des.n_reduce < 1024) {
-        grid_dim.x = DivUp(BLOCKSIZE / 32, des.n_outer);
+        grid_dim.x = DivUpPassive(BLOCKSIZE / 32, des.n_outer);
         return {block_dim, grid_dim};
     }
     grid_dim.x = des.n_outer;
     int64_t bx = des.n_outer, by = 1, split_num = 1, block_reduce = des.n_reduce;
     pplGetSplitNum(bx, by, block_reduce, split_num, multi_block);
     grid_dim.y       = split_num;
-    des.num_elements = DivUp(split_num, des.n_reduce);
+    des.num_elements = DivUpPassive(split_num, des.n_reduce);
     return {block_dim, grid_dim};
 }
 
@@ -79,7 +78,8 @@ std::pair<dim3, dim3> ComputeReduceAllConfigure(
     pplGetSplitNum(bx, by, block_reduce, split_num, multi_block);
     block_dim.x      = BLOCKSIZE;
     grid_dim.x       = split_num;
-    des.num_elements = DivUp(split_num, des.n_reduce);
+    des.num_elements = DivUpPassive(split_num, des.n_reduce);
+    
     return {block_dim, grid_dim};
 }
 
@@ -90,7 +90,7 @@ std::pair<dim3, dim3> ComputeReduceColConfigure(
     bool& multi_block,
     PPLReduceDimDes& des)
 {
-    dim3 block_dim(32, BLOCKSIZE / 32), grid_dim(DivUp(BLOCKSIZE, des.n_outer * des.n_inner), 1);
+    dim3 block_dim(32, BLOCKSIZE / 32), grid_dim(DivUpPassive(BLOCKSIZE, des.n_outer * des.n_inner), 1);
     if (des.n_reduce < 1024)
         return {block_dim, grid_dim};
 
@@ -102,11 +102,11 @@ std::pair<dim3, dim3> ComputeReduceColConfigure(
         return {block_dim, grid_dim};
     }
 
-    bx = des.n_outer * DivUp(32, des.n_inner);
+    bx = des.n_outer * DivUpPassive(32, des.n_inner);
     pplGetSplitNum(bx, by, block_reduce, split_num, multi_block);
     grid_dim.x       = bx;
     grid_dim.y       = split_num;
-    des.num_elements = DivUp(split_num, des.n_reduce);
+    des.num_elements = DivUpPassive(split_num, des.n_reduce);
     des.split_k_num  = split_num;
     return {block_dim, grid_dim};
 }

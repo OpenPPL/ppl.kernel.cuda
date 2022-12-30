@@ -53,6 +53,10 @@ enum ReduceParam {
     ReduceMean = 4
 };
 
+inline constexpr int64_t DivUpPassive(int64_t divisor, int64_t dividend)
+{
+    return (dividend + divisor - 1) / divisor;
+}
 const int BLOCKSIZE     = 1024;
 const int LEASTBLOCKNUM = 128;
 
