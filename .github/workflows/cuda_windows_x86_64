@@ -1,0 +1,39 @@
+name: cuda-windows-x86-64
+
+on:
+  #push:
+  #  branches: [ master ]
+  #  paths-ignore: ['.**', 'docker/**', 'docs/**', 'samples/**', README.md]
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'cmake/cuda.cmake'
+      - 'include/cudakernel/**'
+      - 'src/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}--${{ github.head_ref || github.run_id }}--${{ github.ref }}--${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_test:
+    runs-on: [self-hosted, x64, windows]
+
+    steps:
+      - name: Create Checkout Directory
+        run: |
+          cd ../../ ; ./make_repo_src_dir.ps1 ${{ github.run_id }}
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          path: ${{ github.run_id }}
+
+      - name: Build
+        run: |
+          cd ../../ ; ./build.ps1 ${{ github.run_id }} cuda
+
+      - name: Cleanup
+        if: ${{ always() }}
+        run: |
+          cd ../../ ; ./cleanup.ps1 ${{ github.run_id }} cuda

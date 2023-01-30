@@ -232,6 +232,7 @@ endif()
 
 if(PPLNN_INSTALL)
     install(TARGETS pplkernelcuda_static DESTINATION lib)
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/cudakernel DESTINATION include)
 
     set(__PPLNN_CMAKE_CONFIG_FILE__ ${CMAKE_CURRENT_BINARY_DIR}/generated/pplkernelcuda-config.cmake)
     configure_file(${CMAKE_CURRENT_LIST_DIR}/pplkernelcuda-config.cmake.in
