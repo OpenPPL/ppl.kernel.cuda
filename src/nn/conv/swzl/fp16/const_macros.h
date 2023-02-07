@@ -491,7 +491,8 @@
 #define SM_BASE_V4_1BUF         Max((SM_A_V4_1BUF + SM_B_V4_1BUF), (SM_C_V4_1BUF))
 #define SM_BASE_V4_2BUF         Max((SM_A_V4_2BUF + SM_B_V4_2BUF), (SM_C_V4_1BUF))
 
-#if (defined(__CUDA_ARCH__) && __CUDACC_VER_MAJOR__ >= 11)
+#if ((!defined(__CUDACC_RTC__)) && defined(__CUDA_ARCH__) && __CUDACC_VER_MAJOR__ >= 11) || \
+    (defined(__CUDACC_RTC__) && defined(__CUDA_ARCH__) && __CUDACC_VER_MAJOR__ >= 11 && __CUDACC_VER_MINOR__ >= 2)
 
 #define CVT_SM_PTR(_smp_base, _sm_base) \
     _smp_base = static_cast<unsigned>(__cvta_generic_to_shared(_sm_base));
