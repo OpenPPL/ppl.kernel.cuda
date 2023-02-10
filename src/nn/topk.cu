@@ -376,6 +376,7 @@ __global__ void selectTopK(
         tmpSize -= blockSize;
     }
 
+    __syncthreads();
     int topKRemaining = K - writeStart;
     tmpSize           = sliceSize;
     for (int off = threadIdx.x; off < Align(sliceSize, blockSize); off += blockSize) {
