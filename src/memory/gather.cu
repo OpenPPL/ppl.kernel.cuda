@@ -87,12 +87,12 @@ ppl::common::RetCode PPLCUDAGatherForwardImp(
     if (axis == 0 && indices_shape->GetDimCount() == 1 && indices_shape->GetDim(0) == 1) {
         int indices_data_size = indices_shape->CalcBytesIncludingPadding();
         std::vector<char> indices_data(indices_data_size);
-        cudaMemcpy(indices_data.data(), indices, indices_data_size, cudaMemcpyDeviceToHost);
+        cudaMemcpyAsync(indices_data.data(), indices, indices_data_size, cudaMemcpyDeviceToHost, stream);
         int inner_size   = input_shape->CalcBytesIncludingPadding() / input_shape->GetDim(0);
         int input_offset = get_indices_val(indices_element_size, 0, indices_data.data());
         int input_axis_size = input_shape->GetDim(axis);
         input_offset        = input_offset < 0 ? input_offset + input_axis_size : input_offset;
-        cudaMemcpy(output, static_cast<const char*>(input) + input_offset * inner_size, output_shape->CalcBytesIncludingPadding(), cudaMemcpyDeviceToDevice);
+        cudaMemcpyAsync(output, static_cast<const char*>(input) + input_offset * inner_size, output_shape->CalcBytesIncludingPadding(), cudaMemcpyDeviceToDevice, stream);
         return ppl::common::RC_SUCCESS;
     }
     int64_t num_elems      = output_shape->CalcElementsIncludingPadding();

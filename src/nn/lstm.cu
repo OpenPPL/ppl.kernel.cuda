@@ -195,7 +195,7 @@ ppl::common::RetCode PPLCUDALstmForwardImp(
                 PPLCUDAGemmForwardImp(
                     device_prop, stream, function, &input_shape, pre_hidden, &weight_shape, tR, NULL, &output_shape, post_hidden, gemm_param, tmp_buf, fuse_param, algo_param);
             } else {
-                cudaMemset(post_hidden, 0, 4 * hidden_size * sizeof(__half));
+                cudaMemsetAsync(post_hidden, 0, 4 * hidden_size * sizeof(__half), stream);
             }
 
             __half *out_h = (__half *)Y + cur_idx * num_direction * batch * hidden_size + d * batch * hidden_size;

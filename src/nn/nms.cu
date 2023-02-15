@@ -392,7 +392,7 @@ ppl::common::RetCode PPLCUDANMSForwardImp(
     // process one class one time
     for (int b = 0; b < num_batch; ++b) {
         // step 1: sort scores and index select boxes
-        cudaMemset(temp_buffer, 0, temp_buffer_bytes);
+        cudaMemsetAsync(temp_buffer, 0, temp_buffer_bytes, stream);
         PPLCUDATopKForwardImp(stream,
                               &topk_shape,
                               static_cast<const float *>(scores) + b * scores_shape->CalcElementsFromDimensionIncludingPadding(1),
@@ -410,7 +410,7 @@ ppl::common::RetCode PPLCUDANMSForwardImp(
 
         for (int c = 0; c < num_class; ++c) {
             // reset to zero each iteration (Not necessary)
-            // cudaMemset(sorted_boxes, 0, nms_buffer_size);
+            // cudaMemsetAsync(sorted_boxes, 0, nms_buffer_size, stream);
             float *sorted_scores    = static_cast<float *>(sorted_scores_tot) + c * num_boxes; //+ b * num_class * num_boxes + c * num_boxes;
             int32_t *sorted_indices = sorted_indices_tot + c * num_boxes; // + b * num_class * num_boxes + c * num_boxes;
 
@@ -448,7 +448,7 @@ ppl::common::RetCode PPLCUDANMSForwardImp(
                     }
                 }
                 // step 2: nms operations (type related)
-                cudaMemset(dev_mask, 0, dev_mask_size);
+                cudaMemsetAsync(dev_mask, 0, dev_mask_size, stream);
                 if (boxes_shape->GetDataType() == ppl::common::DATATYPE_FLOAT32) {
                     NMSGpuImpl<float>(stream, (const float *)sorted_boxes, iou_threshold, num_filtered_boxes, max_output_boxes_per_class, center_point_box, max_shared_mem, g_reduce_mask, dev_mask, result_mask);
                 } else if (boxes_shape->GetDataType() == ppl::common::DATATYPE_FLOAT16) {
