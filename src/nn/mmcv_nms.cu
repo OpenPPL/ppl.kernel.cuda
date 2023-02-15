@@ -327,7 +327,7 @@ ppl::common::RetCode PPLCUDAMMCVNMSForwardImp(
     uint64_t *g_reduce_mask = reinterpret_cast<uint64_t *>((char *)result_mask + Align(sizeof(bool) * num_boxes, CUDA_ALIGNMENT));
 
     // reset to zero each iteration
-    cudaMemset(temp_buffer, 0, temp_buffer_bytes);
+    cudaMemsetAsync(temp_buffer, 0, temp_buffer_bytes, stream);
 
     // step 1: sort scores and index select boxes
     PPLCUDATopKForwardImp(stream,

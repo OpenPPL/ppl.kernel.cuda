@@ -139,15 +139,15 @@ void PPLCUDAConvolutionCvtFlt(
     grid.y               = num_grp;
     grid.z               = 1;
     if (type == ppl::common::DATATYPE_FLOAT32) {
-        cudaMemset(output, 0, sizeof(float) * num_grp * out_size_per_grp);
+        cudaMemsetAsync(output, 0, sizeof(float) * num_grp * out_size_per_grp, stream);
         flt_group_padding<float><<<grid, cta_size, 0, stream>>>((float *)output, (float *)input, in_size_per_grp, num_grp, num_chl_per_grp_pad, out_size_per_grp);
 
     } else if (type == ppl::common::DATATYPE_FLOAT16) {
-        cudaMemset(output, 0, sizeof(half) * num_grp * out_size_per_grp);
+        cudaMemsetAsync(output, 0, sizeof(half) * num_grp * out_size_per_grp, stream);
         flt_group_padding<__half><<<grid, cta_size, 0, stream>>>((__half*)output, (__half*)input, in_size_per_grp, num_grp, num_chl_per_grp_pad,
         out_size_per_grp);
     } else if (type == ppl::common::DATATYPE_INT8) {
-        cudaMemset(output, 0, sizeof(int8_t) * num_grp * out_size_per_grp);
+        cudaMemsetAsync(output, 0, sizeof(int8_t) * num_grp * out_size_per_grp, stream);
         flt_group_padding<int8_t><<<grid, cta_size, 0, stream>>>((int8_t*)output, (int8_t*)input, in_size_per_grp, num_grp, num_chl_per_grp_pad,
         out_size_per_grp);
     }

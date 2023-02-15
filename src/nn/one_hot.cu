@@ -39,11 +39,11 @@ __global__ void ppl_cukernel_one_hot(const int64_t* incides, T on_value, T* outp
 }
 
 template <typename T>
-T  get_mask_value(const T* values, T* output, uint64_t nelem){
+T  get_mask_value(cudaStream_t stream, const T* values, T* output, uint64_t nelem){
     T* host_value = (T*)malloc(sizeof(T)*2);
-    cudaMemcpy(host_value, (T*)values, sizeof(T) * 2, cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(host_value, (T*)values, sizeof(T) * 2, cudaMemcpyDeviceToHost, stream);
     T off_value = host_value[0];
-    cudaMemset((void*)output, off_value, sizeof(T)*nelem); // set off value
+    cudaMemsetAsync((void*)output, off_value, sizeof(T)*nelem, stream); // set off value
 
     return host_value[1];
 }
@@ -72,17 +72,17 @@ ppl::common::RetCode PPLCUDAOneHotForwardImp(
 
     switch(datatype){
         case ppl::common::DATATYPE_FLOAT32:{
-            float on_value = get_mask_value<float>((const float*)values, (float*)output, num_elems);
+            float on_value = get_mask_value<float>(stream, (const float*)values, (float*)output, num_elems);
             ppl_cukernel_one_hot<float><<<grid, block, 0, stream>>>((const int64_t*)indices, on_value, (float*)output, outer, depth_val, inner);
             break;
         }
         case ppl::common::DATATYPE_FLOAT16:{
-            half on_value = get_mask_value<half>((const half*)values, (half*)output, num_elems);
+            half on_value = get_mask_value<half>(stream, (const half*)values, (half*)output, num_elems);
             ppl_cukernel_one_hot<half><<<grid, block, 0, stream>>>((const int64_t*)indices, on_value, (half*)output, outer, depth_val, inner);
             break;
         }
         case ppl::common::DATATYPE_INT64:{
-            int64_t on_value = get_mask_value<int64_t>((const int64_t*)values, (int64_t*)output, num_elems);
+            int64_t on_value = get_mask_value<int64_t>(stream, (const int64_t*)values, (int64_t*)output, num_elems);
             ppl_cukernel_one_hot<int64_t><<<grid, block, 0, stream>>>((const int64_t*)indices, on_value, (int64_t*)output, outer, depth_val, inner);
             break;
         }

@@ -143,7 +143,7 @@ ppl::common::RetCode PPLCUDAMaxUnpoolForwardImp(
     int kernel_w)
 {
     int top_elems = output_shape->CalcElementsIncludingPadding();
-    cudaMemset((void*)output, 0, ppl::common::GetSizeOfDataType(output_shape->GetDataType()) * top_elems);
+    cudaMemsetAsync((void*)output, 0, ppl::common::GetSizeOfDataType(output_shape->GetDataType()) * top_elems, stream);
     int batch        = output_shape->GetDim(0);
     int channels     = output_shape->GetDim(1);
     int pad_channels = output_shape->GetDim(1) + output_shape->GetPadding1(1);

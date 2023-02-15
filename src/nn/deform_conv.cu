@@ -313,7 +313,7 @@ ppl::common::RetCode PPLCUDADeformConvModifyWeights(
     int s        = flt_shape->GetDim(3);
     int size     = c * r * s;
     if (size % pad_size == 0) {
-        cudaMemcpy(out_flt, in_flt, n * size * sizeof(__half), cudaMemcpyDeviceToDevice);
+        cudaMemcpyAsync(out_flt, in_flt, n * size * sizeof(__half), cudaMemcpyDeviceToDevice, stream);
         return ppl::common::RC_SUCCESS;
     }
     int aligned_size = Align(size, pad_size);
