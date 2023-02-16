@@ -107,7 +107,7 @@ ppl::common::RetCode PPLCUDASplitForwardImp(
             int out_split_axis_length = out_dims[i][split_axis];                                                                                                                                  \
             int split_size_with_axis  = out_split_axis_length * split_size;                                                                                                                       \
             int memcpy_threshold      = 64;                                                                                                                                                       \
-            if (split_size_with_axis < memcpy_threshold) {                                                                                                                                        \
+            if (split_count > memcpy_threshold || split_size_with_axis < memcpy_threshold) {                                                                                                                                        \
                 int block_size = 128;                                                                                                                                                             \
                 int out_elems  = split_size_with_axis * split_count;                                                                                                                              \
                 int grid_size  = (out_elems + block_size - 1) / block_size;                                                                                                                       \
