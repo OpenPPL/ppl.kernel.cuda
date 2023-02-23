@@ -272,7 +272,7 @@ template<>
 __device__ inline half ppl_arithmetic_scalar<Arithmetic_Mod, half>(half a, half b)
 {
 #if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
-    
+
     int r = __half2int_rz(__hdiv(a, b));
     return __hsub(a, __hmul(__int2half_rz(r), b));
 #else
@@ -427,7 +427,7 @@ static int ppl_get_num_broadcast_dims(const ppl::common::TensorShape *tensor_sha
 bool ppl_feature_broadcast(
     const ppl::common::TensorShape *tensor_shape0,
     const ppl::common::TensorShape *tensor_shape1,
-    int *axis) 
+    int *axis)
 {
     bool bidirectional = false;
     ppl::common::TensorShape pad_tensor_shape0 = *tensor_shape0;
@@ -544,7 +544,7 @@ static void calculate_nhwc_stride(uint32_t *strides,
     }
     int chl_dim = tensor_shape->GetDim(1);
     strides[1] = 1; // chl stride
-    
+
     int acc_stride = (chl_dim + packed_channel - 1) / packed_channel * packed_channel;
     for(int i = max_dim_count - 1; i >= 0; --i) {
         if (i == 1) continue;
@@ -618,7 +618,7 @@ __global__ void ppl_cukernel_arithmetic_fp16(
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic(
     const uint64_t num_elems,
-    const int dim_count, 
+    const int dim_count,
     ArithmeticParam param,
     const T *input0,
     const T* input1,
@@ -633,16 +633,16 @@ __global__ void ppl_cukernel_arithmetic(
         uint64_t dim_off = index / param.stride_out[i];
         offset0 += dim_off * param.stride_in0[i];
         offset1 += dim_off * param.stride_in1[i];
-        index = index % param.stride_out[i]; 
+        index = index % param.stride_out[i];
     }
-    
+
     output[out_index] = ppl_arithmetic_scalar<op_type, T>(input0[offset0], input1[offset1]);
 }
 
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_limit_nhwc(
     const uint64_t num_elems,
-    const int dim_count, 
+    const int dim_count,
     ArithmeticParam param_ndarray,
     ArithmeticParam param_nhwc,
     const T *input0,
@@ -659,16 +659,16 @@ __global__ void ppl_cukernel_arithmetic_limit_nhwc(
         offset0 += dim_off * param_nhwc.stride_in0[i];
         offset1 += dim_off * param_nhwc.stride_in1[i];
         out_offset += dim_off * param_nhwc.stride_out[i];
-        index = index % param_ndarray.stride_out[i]; 
+        index = index % param_ndarray.stride_out[i];
     }
-    
+
     output[out_offset] = ppl_arithmetic_scalar<op_type, T>(input0[offset0], input1[offset1]);
 }
 
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_limit_nhwc_int8(
     const uint64_t num_elems,
-    const int dim_count, 
+    const int dim_count,
     ArithmeticParam param_ndarray,
     ArithmeticParam param_nhwc,
     const T *input0,
@@ -688,9 +688,9 @@ __global__ void ppl_cukernel_arithmetic_limit_nhwc_int8(
         offset0 += dim_off * param_nhwc.stride_in0[i];
         offset1 += dim_off * param_nhwc.stride_in1[i];
         out_offset += dim_off * param_nhwc.stride_out[i];
-        index = index % param_ndarray.stride_out[i]; 
+        index = index % param_ndarray.stride_out[i];
     }
-    
+
     output[out_offset] = ppl_arithmetic_scalar_int8<op_type, T>(input0[offset0], input1[offset1],
             in_scale0, in_scale1, out_scale);
 }
@@ -698,7 +698,7 @@ __global__ void ppl_cukernel_arithmetic_limit_nhwc_int8(
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_int8(
     const uint64_t num_elems,
-    const int dim_count, 
+    const int dim_count,
     ArithmeticParam param,
     const T *input0,
     const T* input1,
@@ -716,9 +716,9 @@ __global__ void ppl_cukernel_arithmetic_int8(
         uint64_t dim_off = index / param.stride_out[i];
         offset0 += dim_off * param.stride_in0[i];
         offset1 += dim_off * param.stride_in1[i];
-        index = index % param.stride_out[i]; 
+        index = index % param.stride_out[i];
     }
-    
+
     output[out_index] = ppl_arithmetic_scalar_int8<op_type, T>(input0[offset0], input1[offset1], in_scale0, in_scale1, out_scale);
 }
 
@@ -750,7 +750,7 @@ __global__ void ppl_cukernel_arithmetic_nobroadcast_int8(
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_one_scalar(
     const uint64_t num_elems,
-    const bool first_shorter, 
+    const bool first_shorter,
     const T *input0,
     const T* input1,
     T *output) {
@@ -765,7 +765,7 @@ __global__ void ppl_cukernel_arithmetic_one_scalar(
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_one_scalar_int8(
     const uint64_t num_elems,
-    const bool first_shorter, 
+    const bool first_shorter,
     const T *input0,
     const T* input1,
     T *output,
@@ -784,7 +784,7 @@ template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_one_dimension(
     const uint64_t num_elems,
     const int32_t inner_dim,
-    const bool first_shorter, 
+    const bool first_shorter,
     const T *input0,
     const T* input1,
     T *output) {
@@ -801,7 +801,7 @@ __global__ void ppl_cukernel_arithmetic_one_not_broadcast(
     const uint64_t num_elems,
     const int32_t axis_lgt,
     const int32_t inner_dim,
-    const bool first_shorter, 
+    const bool first_shorter,
     const T *input0,
     const T* input1,
     T *output) {
@@ -817,7 +817,7 @@ template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_one_dimension_int8(
     const uint64_t num_elems,
     const int32_t inner_dim,
-    const bool first_shorter, 
+    const bool first_shorter,
     const T *input0,
     const T* input1,
     T *output,
@@ -835,9 +835,9 @@ __global__ void ppl_cukernel_arithmetic_one_dimension_int8(
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_one_broadcast(
     const uint64_t num_elems,
-    const int outer_stride, 
-    const int inner_dim, 
-    const bool first_shorter, 
+    const int outer_stride,
+    const int inner_dim,
+    const bool first_shorter,
     const T *input0,
     const T* input1,
     T *output) {
@@ -854,9 +854,9 @@ __global__ void ppl_cukernel_arithmetic_one_broadcast(
 template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_one_broadcast_int8(
     const uint64_t num_elems,
-    const int outer_stride, 
-    const int inner_dim, 
-    const bool first_shorter, 
+    const int outer_stride,
+    const int inner_dim,
+    const bool first_shorter,
     const T *input0,
     const T* input1,
     T *output,
@@ -888,7 +888,7 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImp(
     uint64_t grid_size = (num_elems + block_size - 1) / block_size;
     int axis = 0; bool bidirectional = false;
     int num_broadcast_dims = ppl_get_num_broadcast_dims(input_shape0, input_shape1, axis, bidirectional);
-    if (!bidirectional && ((input_shape0->GetDimCount() < 2) || (input_shape1->GetDimCount() < 2))) {
+    if (!bidirectional && num_broadcast_dims > 0 && ((input_shape0->GetDimCount() < 2) || (input_shape1->GetDimCount() < 2))) {
         bool first_shorter = false;
         if (input_shape0->CalcElementsIncludingPadding() < input_shape1->CalcElementsIncludingPadding()) {
             first_shorter = true;
@@ -911,8 +911,8 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImp(
             if (output_shape->GetDataType() == ppl::common::DATATYPE_FLOAT16) {
                 // one broadcast (or last dimensions broadcast)
                 if (ppl_feature_broadcast(input_shape0, input_shape1, &axis)) {
-                    int inner_dim = output_shape->CalcElementsToDimensionIncludingPadding(axis) * 
-                                    output_shape->CalcElementsFromDimensionIncludingPadding(axis - 1) / 
+                    int inner_dim = output_shape->CalcElementsToDimensionIncludingPadding(axis) *
+                                    output_shape->CalcElementsFromDimensionIncludingPadding(axis - 1) /
                                     output_shape->CalcElementsIncludingPadding();
                     int outer_stride =  output_shape->CalcElementsFromDimensionIncludingPadding(1);
                     bool first_shorter = false;
@@ -924,7 +924,7 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImp(
                         first_shorter = true;
                     }
                     ppl_cukernel_arithmetic_one_broadcast<op_type, half><<<grid_size, block_size, 0,
-                        stream>>>(num_elems, outer_stride, inner_dim, first_shorter, (const half*)input0, (const half*)input1, (half*)output); 
+                        stream>>>(num_elems, outer_stride, inner_dim, first_shorter, (const half*)input0, (const half*)input1, (half*)output);
                 // normal case, deal one half once
                 } else if ((input_shape0->GetDim(1) & 0x7) || (input_shape1->GetDim(1) & 0x7)) {
                     int channel_shift  = 0;
@@ -1021,8 +1021,8 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImpInt8(
         if (output_shape->GetDataFormat() == ppl::common::DATAFORMAT_NHWC8 ||
             output_shape->GetDataFormat() == ppl::common::DATAFORMAT_NHWC16) {
                 if(ppl_feature_broadcast(input_shape0, input_shape1, &axis)) {
-                    int inner_dim = output_shape->CalcElementsToDimensionIncludingPadding(axis) * 
-                                    output_shape->CalcElementsFromDimensionIncludingPadding(axis - 1) / 
+                    int inner_dim = output_shape->CalcElementsToDimensionIncludingPadding(axis) *
+                                    output_shape->CalcElementsFromDimensionIncludingPadding(axis - 1) /
                                     output_shape->CalcElementsIncludingPadding();
                     int outer_stride =  output_shape->CalcElementsFromDimensionIncludingPadding(1);
                     bool first_shorter = false;
@@ -1135,7 +1135,7 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImpLimitNhwc(
     packed_channel = 8;
     ppl_arithmetic_prepare_strides_limit_nhwc(input_shape0, input_shape1,
         output_shape, packed_channel, param_nhwc.stride_in0, param_nhwc.stride_in1, param_nhwc.stride_out);
-    
+
     int axis = 0; bool bidirectional = false;
     int num_broadcast_dims = ppl_get_num_broadcast_dims(input_shape0, input_shape1, axis, bidirectional);
     if (!bidirectional) {
@@ -1172,7 +1172,7 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImpLimitNhwcInt8(
     if (input_shape0->GetDataFormat() == ppl::common::DATAFORMAT_NHWC16) packed_channel = 16;
     ppl_arithmetic_prepare_strides_limit_nhwc(input_shape0, input_shape1,
         output_shape, packed_channel, param_nhwc.stride_in0, param_nhwc.stride_in1, param_nhwc.stride_out);
-    
+
     int axis = 0; bool bidirectional = false;
     int num_broadcast_dims = ppl_get_num_broadcast_dims(input_shape0, input_shape1, axis, bidirectional);
     if (!bidirectional) {
@@ -1257,7 +1257,7 @@ ppl::common::RetCode PPLCUDAArithMetic##OPTYPE##ForwardImp( \
     } else { \
         return ppl::common::RC_UNSUPPORTED; \
     } \
-} 
+}
 
 INSTANT(Add);
 INSTANT(Sub);
