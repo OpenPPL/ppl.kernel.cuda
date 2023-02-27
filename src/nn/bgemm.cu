@@ -376,7 +376,7 @@ double PPLCUDABgemmSelectKernel(
         return FLT_MAX;
     //FIXME Dim is 64 bit?
     int m_id = dim_count0 - 2;
-    while(m_id && input_shape->GetDim(m_id)==1)    m_id--;
+    // while(m_id && input_shape->GetDim(m_id)==1)    m_id--;
     int M = input_shape->GetDim(m_id);
     uint64_t batch = 1;
     for (int i = 0; i < m_id; i++){
@@ -518,7 +518,7 @@ ppl::common::RetCode PPLCUDABgemmForwardImp(
     auto dim_count0 = input_shape->GetDimCount();
     auto dim_count1 = weight_shape->GetDimCount();
     int m_id = dim_count0 - 2;
-    while(m_id && input_shape->GetDim(m_id)==1)    m_id--;
+    // while(m_id && input_shape->GetDim(m_id)==1)    m_id--;
     int M = input_shape->GetDim(m_id);
     uint64_t batch = 1;
     for (int i = 0; i < m_id; i++){
