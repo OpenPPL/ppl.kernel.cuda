@@ -88,6 +88,46 @@ __global__ void ppl_cukernel_pad(
     }
     output[index] = use_pad_value ? (T)param.constant_value : input[input_offset];
 }
+
+template <typename T, int MODE>
+__global__ void ppl_cukernel_pad_fast3(
+    int64_t num_elems,
+    int num_dims,
+    int vec_factor,
+    int vec_dim_size,
+    PadKernelParam param,
+    GArray<int64_t> input_dims,
+    GArray<int64_t> input_strides,
+    const float4* input,
+    const int64_t* pads,
+    GArray<DivModFast> output_strides_fast,
+    float4* output)
+{
+    int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= num_elems)
+        return;
+    bool use_pad_value   = false;
+    float4 constant_val;
+    T* constant_val_ptr = reinterpret_cast<T*>(&constant_val);
+    for (int i = 0; i < vec_factor; ++i) {
+        constant_val_ptr[i] = (T)param.constant_value;
+    }
+    int64_t input_offset = 0;
+    int out_idx, remain = index;
+    for (int it = 0; (it < num_dims) && !use_pad_value; ++it) {
+        output_strides_fast[it].divmod(remain, out_idx, remain);
+        int64_t start_pad_val = pads[it];
+        int in_idx            = 0;
+        in_idx = pad_calc_in_idx<MODE>(out_idx, start_pad_val, input_dims[it], use_pad_value);
+        input_offset += in_idx * input_strides[it];
+    }
+    input_offset *= vec_dim_size;
+    for (int i = 0; i < vec_dim_size; ++i) {
+        output[index * vec_dim_size + i] = use_pad_value ? constant_val : input[input_offset + i];
+    } 
+    
+}
+
 bool isFastPadSupported(const std::vector<int32_t>& pads, int32_t num_dims) {
     if (num_dims < 3) return false;
     int32_t diff_cnt = num_dims - 2;
@@ -142,6 +182,23 @@ __global__ void ppl_cukernel_pad_fast2(const T* input, int src_height, int src_w
     output[dst_idx] = use_pad_value ? (T)param.constant_value : input[src_idx];
 }
 
+// last n-dim not padded
+bool isFastPadSupported3(ppl::common::TensorShape* input_shape,
+        const std::vector<int32_t>& pads, int32_t num_dims, int32_t& num_last) {
+    constexpr int float4_as_bytes = 16;
+    num_last = 0;
+    int vec_last_cnt = 1;
+    for (int32_t i = num_dims - 1; i >= 0; --i) {
+        if (pads[i] == 0 && pads[num_dims + i] == 0) {
+            vec_last_cnt *= input_shape->GetDim(i);
+            ++num_last;
+        } else break;
+    }
+    int vec_last_size = ppl::common::GetSizeOfDataType(input_shape->GetDataType()) * vec_last_cnt;
+    return ((num_last != 0) && (vec_last_size >= float4_as_bytes));
+}
+
+
 ppl::common::RetCode PPLCUDAPadForwardImp(
     cudaStream_t stream,
     PadKernelParam param,
@@ -152,6 +209,7 @@ ppl::common::RetCode PPLCUDAPadForwardImp(
     void* output)
 {
     int num_dims       = output_shape->GetDimCount();
+    int num_last = 0; // last n dims is not padded
     if (isFastPadSupported(param.pads, num_dims)) {
         int batch = input_shape->CalcElementsToDimensionExcludingPadding(num_dims - 2);
         int dst_height = output_shape->GetDim(num_dims - 2);
@@ -224,6 +282,74 @@ ppl::common::RetCode PPLCUDAPadForwardImp(
                         PAD_EXEC_FAST2(float, PadKernelParam::PAD_MODE_REFLECT)
                     case PadKernelParam::PAD_MODE_EDGE:
                         PAD_EXEC_FAST2(float, PadKernelParam::PAD_MODE_EDGE)
+                }
+                return ppl::common::RC_SUCCESS;
+            }
+            default:
+                return ppl::common::RC_UNSUPPORTED;
+            }
+    } else if (isFastPadSupported3(input_shape, param.pads, num_dims, num_last)) {
+        constexpr int float4_as_bytes = 16;
+        int vec_factor = float4_as_bytes / ppl::common::GetSizeOfDataType(input_shape->GetDataType());
+        int vec_dim_size = 1;
+        for (int i = 0; i < num_last; ++i) {
+            vec_dim_size *= input_shape->GetDim(num_dims - 1 - i);
+        }
+        int calc_dims = num_dims - num_last;
+        int block_size     = 256;
+        uint64_t num_elems = output_shape->CalcElementsToDimensionIncludingPadding(calc_dims);
+        int grid_size      = (num_elems + block_size - 1) / block_size;
+        vec_dim_size /= vec_factor;
+
+        GArray<int64_t> input_dims(calc_dims);
+        GArray<int64_t> input_strides(calc_dims);
+        GArray<DivModFast> output_strides_fast(calc_dims);
+        int64_t acc_output_stride = 1;
+        int64_t acc_input_stride  = 1;
+        for (int it = calc_dims - 1; it >= 0; --it) {
+            input_dims[it]          = input_shape->GetDim(it);
+            input_strides[it]       = acc_input_stride;
+            output_strides_fast[it] = DivModFast(acc_output_stride);
+            acc_input_stride *= input_shape->GetDim(it);
+            acc_output_stride *= output_shape->GetDim(it);
+        }
+  
+        #define PAD_EXEC_FAST3(TYPE, MODE) \
+    ppl_cukernel_pad_fast3<TYPE, MODE><<<grid_size, block_size, 0, stream>>>( \
+                num_elems, calc_dims, vec_factor, vec_dim_size, param, input_dims, input_strides, (const float4*)input, pads, output_strides_fast, (float4*)output); \
+    break;
+
+        switch (input_shape->GetDataType()) {
+            case ppl::common::DATATYPE_INT8: {
+                switch(param.mode) {
+                    case PadKernelParam::PAD_MODE_CONSTANT:
+                        PAD_EXEC_FAST3(int8_t, PadKernelParam::PAD_MODE_CONSTANT)
+                    case PadKernelParam::PAD_MODE_REFLECT:
+                        PAD_EXEC_FAST3(int8_t, PadKernelParam::PAD_MODE_REFLECT)
+                    case PadKernelParam::PAD_MODE_EDGE:
+                        PAD_EXEC_FAST3(int8_t, PadKernelParam::PAD_MODE_EDGE)
+                }
+                return ppl::common::RC_SUCCESS;
+            }
+            case ppl::common::DATATYPE_FLOAT16: {
+                switch(param.mode) {
+                    case PadKernelParam::PAD_MODE_CONSTANT:
+                        PAD_EXEC_FAST3(half, PadKernelParam::PAD_MODE_CONSTANT)
+                    case PadKernelParam::PAD_MODE_REFLECT:
+                        PAD_EXEC_FAST3(half, PadKernelParam::PAD_MODE_REFLECT)
+                    case PadKernelParam::PAD_MODE_EDGE:
+                        PAD_EXEC_FAST3(half, PadKernelParam::PAD_MODE_EDGE)
+                }
+                return ppl::common::RC_SUCCESS;
+            }
+            case ppl::common::DATATYPE_FLOAT32: {
+                switch(param.mode) {
+                    case PadKernelParam::PAD_MODE_CONSTANT:
+                        PAD_EXEC_FAST3(float, PadKernelParam::PAD_MODE_CONSTANT)
+                    case PadKernelParam::PAD_MODE_REFLECT:
+                        PAD_EXEC_FAST3(float, PadKernelParam::PAD_MODE_REFLECT)
+                    case PadKernelParam::PAD_MODE_EDGE:
+                        PAD_EXEC_FAST3(float, PadKernelParam::PAD_MODE_EDGE)
                 }
                 return ppl::common::RC_SUCCESS;
             }
