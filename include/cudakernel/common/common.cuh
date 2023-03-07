@@ -130,6 +130,7 @@ __device__ __forceinline__ T BlockReduceSum(T val) {
     __syncthreads();
 
     val = (lane < (blockDim.x >> 5)) ? shared[lane] : (T)0.0f;
+    __syncthreads();
     val = WarpReduceSum(val);
     return val;
 }

@@ -117,7 +117,7 @@ __global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp32(
 
     if (has_affine) {
         for (int i = tid; i < inner; i += blockDim.x) {
-            float weight_val = weight[outer_idx]; float bias_val = bias[outer_idx];
+            float weight_val = weight[tid]; float bias_val = bias[tid];
             float out_val = weight_val * (input_ptr[i] - mean_val) * r_std  + bias_val;
             // if(if_relu) out_val = (out_val > 0) ? out_val : 0;
             output_ptr[i] =  out_val;
@@ -221,7 +221,7 @@ __global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp16(
 
     if (has_affine) {
         for (int i = tid; i < inner; i += blockDim.x) {
-            half weight_val = weight[outer_idx]; half bias_val = bias[outer_idx];
+            half weight_val = weight[tid]; half bias_val = bias[tid];
             half out_val = weight_val * (input_ptr[i] - mean_val_h) * r_std_h  + bias_val;
             // if(if_relu) out_val = (out_val > 0) ? out_val : 0;
             output_ptr[i] =  out_val;
@@ -284,8 +284,8 @@ __global__ __launch_bounds__(256) void ppl_cudakernel_layernorm_int8(
     for (int i=tid; i < inner; i += blockDim.x){
         float weight_val = 1.0f;  float bias_val=0;
         if (has_affine){
-             weight_val = weight[outer_idx];
-             bias_val = bias[outer_idx];
+             weight_val = weight[tid];
+             bias_val = bias[tid];
         }
 
         float out_val = weight_val * ((float)input[outer_idx * inner + i] *in_scale - mean_val) * r_std + bias_val;
