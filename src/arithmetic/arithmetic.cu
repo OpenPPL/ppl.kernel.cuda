@@ -543,7 +543,10 @@ static void calculate_nhwc_stride(uint32_t *strides,
         return;
     }
     int chl_dim = tensor_shape->GetDim(1);
-    strides[1] = 1; // chl stride
+    if(chl_dim==1)
+        strides[1] = 0;
+    else
+        strides[1] = 1; // chl stride
 
     int acc_stride = (chl_dim + packed_channel - 1) / packed_channel * packed_channel;
     for(int i = max_dim_count - 1; i >= 0; --i) {
