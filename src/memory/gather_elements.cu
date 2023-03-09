@@ -64,7 +64,6 @@ __global__ void ppl_cukernel_gather(
     int64_t input_idx = (outer_idx * output_axis_size + indices_idx) *
                             output_inner_block_fast.d_ +
                         inner_idx;
-    printf("%d %lld\n", index, input_idx);
     output[index] = input[input_idx];
 }
 
