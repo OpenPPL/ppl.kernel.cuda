@@ -23,7 +23,7 @@
 #include <memory>
 #include <stdio.h>
 
-__host__ __device__ __inline__ int get_indices_val(
+static __host__ __device__ __inline__ int get_indices_val(
     int indices_element_size,
     int offset,
     const void* indices)
@@ -43,7 +43,7 @@ __host__ __device__ __inline__ int get_indices_val(
 }
 
 template <typename T>
-__global__ void ppl_cukernel_gather(
+__global__ void ppl_cukernel_gather_elements(
     int64_t num_elems,
     DivModFast output_outer_block_fast,
     int output_axis_size,
@@ -64,7 +64,6 @@ __global__ void ppl_cukernel_gather(
     int64_t input_idx = (outer_idx * output_axis_size + indices_idx) *
                             output_inner_block_fast.d_ +
                         inner_idx;
-    printf("%d %lld\n", index, input_idx);
     output[index] = input[input_idx];
 }
 
@@ -93,7 +92,7 @@ ppl::common::RetCode PPLCUDAGatherElementsForwardImp(
 
 #define SWITCH_CASE(TYPE)                                                                                                                                                                                                       \
     case sizeof(TYPE): {                                                                                                                                                                                                        \
-        ppl_cukernel_gather<<<grid_size, block_size, 0, stream>>>(num_elems, output_outer_block_fast, output_axis_size, output_inner_block_fast, (const TYPE*)input, (TYPE*)output, indices_element_size, (const void*)indices); \
+        ppl_cukernel_gather_elements<<<grid_size, block_size, 0, stream>>>(num_elems, output_outer_block_fast, output_axis_size, output_inner_block_fast, (const TYPE*)input, (TYPE*)output, indices_element_size, (const void*)indices); \
         return ppl::common::RC_SUCCESS;                                                                                                                                                                                         \
     }
 
