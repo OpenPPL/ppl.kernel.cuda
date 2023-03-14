@@ -35,10 +35,10 @@ __global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp32_float4(
     val.z = (data[4*tid+2] - mean) * rstd;
     val.w = (data[4*tid+3] - mean) * rstd;
     if(has_affine){
-        val.x = val.x * (float)__ldg(scale + 4*tid+0) + (float)__ldg(shift + 4*tid+0);
-        val.y = val.y * (float)__ldg(scale + 4*tid+1) + (float)__ldg(shift + 4*tid+1);
-        val.z = val.z * (float)__ldg(scale + 4*tid+2) + (float)__ldg(shift + 4*tid+2);
-        val.w = val.w * (float)__ldg(scale + 4*tid+3) + (float)__ldg(shift + 4*tid+3);
+        val.x = val.x * (float)scale[4*tid+0] + (float)shift[4*tid+0];
+        val.y = val.y * (float)scale[4*tid+1] + (float)shift[4*tid+1];
+        val.z = val.z * (float)scale[4*tid+2] + (float)shift[4*tid+2];
+        val.w = val.w * (float)scale[4*tid+3] + (float)shift[4*tid+3];
     }
 
     FETCH_FLOAT4(cur_out[4*tid]) =  val;
@@ -53,7 +53,7 @@ __global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp32_opt(
     float sumx=0;
     float sumy=0;
     for(auto tid = threadIdx.x; tid < N; tid += blockDim.x) {
-        float v = (float)__ldg(cur_in + tid);
+        float v = (float)cur_in[tid];
         sumx += v;
         sumy += v* v;
     }
@@ -63,9 +63,9 @@ __global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp32_opt(
     float mean = sumx_ / N;
     float rstd = rsqrtf(sumy_ / N - mean * mean + eps);
     for(auto tid = threadIdx.x; tid < N; tid += blockDim.x) {
-        float val = ((float)__ldg(cur_in + tid) - mean) * rstd;
+        float val = ((float)cur_in[tid] - mean) * rstd;
         if(has_affine){
-            val = val * (float)__ldg(scale + tid) + (float)__ldg(shift + tid);
+            val = val * (float)scale[tid] + (float)shift[tid];
         }
         cur_out[tid] =  val;
     }
