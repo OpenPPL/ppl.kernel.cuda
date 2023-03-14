@@ -23,6 +23,7 @@
 template <typename T>
 __global__ void ppl_cukernel_einsum_nbdce(const T* input0, const T* input1, T* output, uint64_t outer, uint64_t inner,
                                         uint64_t n, uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
         // nbac * ndae --> nbdce
         int tid = threadIdx.x;
         int outer_id = blockIdx.x; //nbd
@@ -74,10 +75,12 @@ __global__ void ppl_cukernel_einsum_nbdce(const T* input0, const T* input1, T* o
 
         uint64_t output_offset = outer_id * inner + inner_id;
         output[output_offset] = tmp[0];
+#endif
 }
 template <typename T>
 __global__ void ppl_cukernel_einsum_nbdc(const T* input0, const T* input1, T* output, uint64_t outer, uint64_t inner,
                                         uint64_t n, uint64_t a, uint64_t b, uint64_t c, uint64_t d){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
         // nabc * nadc -> n(a)bdc
         int tid = threadIdx.x;
         int outer_id = blockIdx.x; //nc
@@ -113,6 +116,7 @@ __global__ void ppl_cukernel_einsum_nbdc(const T* input0, const T* input1, T* ou
         // nbdc
         uint64_t output_offset = n_id*b*d*c + b_id*d*c + d_id*c + c_id;
         output[output_offset] = tmp[0];
+#endif
 }
 
 ppl::common::RetCode PPLCUDAEinSum_nbac_ndae_nbdce_ForwardImp(
@@ -216,6 +220,7 @@ ppl::common::RetCode PPLCUDAEinSum_nabc_nadc_nbdc_ForwardImp(
 template <typename T>
 __global__ void ppl_cukernel_einsum_nbdce2(const T* input0, const T* input1, T* output, uint64_t outer, uint64_t inner,
                                         uint64_t n, uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
         // nbac * ndae --> nbdce
         // grid(d, b, n) block(e, c)
         // int ix = threadIdx.x + blockDim.x * blockIdx.x;
@@ -243,6 +248,7 @@ __global__ void ppl_cukernel_einsum_nbdce2(const T* input0, const T* input1, T* 
         // __syncthreads();
 
         output[g_threadId] = sum;
+#endif
 }
 
 
@@ -295,7 +301,7 @@ ppl::common::RetCode PPLCUDAEinSum_nbac_ndae_nbdce_2_ForwardImp(
 
 template <typename T>
 __global__ void ppl_cukernel_einsum_i_j_ij(const T* input0, const T* input1, T* output, uint64_t i, uint64_t j){
-
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
         // int g_blockId = blockIdx.y * gridDim.x + blockIdx.x;
         // int g_threadId = g_blockId * (blockDim.y * blockDim.x) + threadIdx.y * blockDim.x + threadIdx.x;
        
@@ -306,6 +312,7 @@ __global__ void ppl_cukernel_einsum_i_j_ij(const T* input0, const T* input1, T* 
         if(index_i >= i || index_j >= j) return;
 
         output[id] = input0[index_i] * input1[index_j];
+#endif
 }
 
 ppl::common::RetCode PPLCUDAEinSum_i_j_ij_ForwardImp(
