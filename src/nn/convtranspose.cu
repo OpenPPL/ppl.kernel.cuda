@@ -22,7 +22,6 @@
 #include "cudakernel/memory/transpose.h"
 #include "cudakernel/nn/conv/conv_fp16.h"
 #include "conv_common.h"
-#include "cudakernel/gemm/gemm.h"
 #include <cuda_fp16.h>
 #else
 #include "cudakernel/nn/convtranspose.h"
@@ -31,6 +30,7 @@
 #include "cudakernel/nn/conv/conv_fp16.h"
 #endif
 #include "cudakernel/common/common.h"
+#include "cudakernel/gemm/gemm.h"
 
 #define CUDA_KERNEL_LOOP(i, n)                          \
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; \
