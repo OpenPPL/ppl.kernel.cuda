@@ -16,7 +16,6 @@
 // under the License.
 
 #if __CUDACC_VER_MAJOR__ * 1000 + __CUDACC_VER_MINOR__ * 10 >= 10020
-#include "cudakernel/gemm/gemm.h"
 #include "cudakernel/math/math.h"
 #include "cudakernel/common/cuda_check.h"
 
@@ -38,6 +37,7 @@ static bool is_g_int8_kvec_set = false;
 #include "cudakernel/nn/conv/conv_fp16.h"
 #endif
 #include "cudakernel/common/common.h"
+#include "cudakernel/gemm/gemm.h"
 
 #define FAKE_INT8_CONV_PARAM              \
     int in_hw               = 1;     \
