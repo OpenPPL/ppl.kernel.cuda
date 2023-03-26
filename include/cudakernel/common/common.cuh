@@ -59,7 +59,11 @@ __device__ __forceinline__ T _SafeExp(const T v) {
 }
 
 template<typename T>
-__device__ __forceinline__ T _LogAdd(const T x, const T y) {
+__device__ __forceinline__ T _LogAdd(T x, T y) {
+    x = min(x, _ExpMax<T>());
+    x = max(x, CudaLogZero<T>());
+    y = min(y, _ExpMax<T>());
+    y = max(y, CudaLogZero<T>());
     return x + max(log(_SafeExp(y - x) + (T)1.0f), y - x);
 }
 

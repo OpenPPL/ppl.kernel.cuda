@@ -39,19 +39,17 @@ ppl::common::RetCode PPLCUDAFastSoftmax(
     const void* input,
     const ppl::common::TensorShape* output_shape,
     void* output,
-    const void* key_padding_mask,
-    const int mask_type);
+    const void* key_padding_mask);
 
-template<typename Tin, typename MaskT, typename Tout>
+template<typename Tin, typename Tout>
 ppl::common::RetCode PPLCUDAFastSoftmaxForwardImp(
     cudaStream_t stream,
     const Tin* input,
     Tout* output,
-    const MaskT* key_padding_mask,
-    const int mask_type,
-    const int B,
-    const int H,
-    const int T);
+    const bool* key_padding_mask,
+    const int mask_scale,
+    const int outer,
+    const int inner);
 
 ppl::common::RetCode PPLCUDASoftmaxForwardImpInt8(
     cudaStream_t stream,
