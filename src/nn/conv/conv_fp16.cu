@@ -999,6 +999,10 @@ ppl::common::RetCode GetFp16ConvKernelNominees(
 
     int sm_num = device_prop.multiProcessorCount;
     int device_arch      = device_prop.major * 10 + device_prop.minor;
+    if (device_arch < 75) {
+        LOG(ERROR)<<"pplnn should be compiled on cuda >= 10.2 and run on architeture >= sm_75";
+        return ppl::common::RC_UNSUPPORTED;
+    }
     int max_regs_per_thd = 255;
     int max_regs_per_sm  = device_prop.regsPerMultiprocessor;
 #if __CUDACC_VER_MAJOR__ >= 11
