@@ -41,15 +41,15 @@ ppl::common::RetCode PPLCUDAFastSoftmax(
     void* output,
     const void* key_padding_mask);
 
-template<typename Tin, typename Tout>
+template<typename T, int pack_size>
 ppl::common::RetCode PPLCUDAFastSoftmaxForwardImp(
     cudaStream_t stream,
-    const Tin* input,
-    Tout* output,
+    const T* input,
+    T* output,
     const bool* key_padding_mask,
     const int mask_scale,
-    const int outer,
-    const int inner);
+    const int outer_dim,
+    const int inner_dim);
 
 ppl::common::RetCode PPLCUDASoftmaxForwardImpInt8(
     cudaStream_t stream,
