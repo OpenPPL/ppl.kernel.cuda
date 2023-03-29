@@ -25,6 +25,7 @@
 #include "cudakernel/common/common.cuh"
 #include "cudakernel/common/common.h"
 #include "../reformat/cvt_int8_float.cuh"
+#include "ppl/common/log.h"
 
 template <typename T>
 __device__ inline T __ldg_ver_ctrl(T* ptr) {
@@ -145,110 +146,173 @@ ppl::common::RetCode PPLCUDASoftmaxForwardImpInt8(
 }
 
 
-template <typename Tin, typename Tout>                                                              
-__global__ void SoftmaxScoreKernel32Mask(                                                    
-    const Tin* in, const bool* key_padding_mask, Tout* out,                                        
-    const int mask_scale, const int T) {                                                        
-        auto cur_in = in + blockIdx.x * T;                                                          
-        auto cur_out = out + blockIdx.x * T;                                                        
-        auto cur_mask = key_padding_mask + blockIdx.x / mask_scale * T;                                               
-        float log_sum = CudaLogZero<float>();                                                  
-        for (auto tid = threadIdx.x; tid < T; tid += blockDim.x) {                                  
-            float maskv = (float) static_cast<float>(_Ldg(cur_mask + tid));  
-            maskv = 0;                 
-            log_sum =                                                                               
-                    _LogAdd((float)__ldg_ver_ctrl(cur_in + tid) * ((float)1.0f - maskv) +              
-                            CudaLogZero<float>() * maskv, log_sum);                              
-        }                                                                                           
-        log_sum = WarpReduceLogAddSum(log_sum);                                                     
-        for (auto tid = threadIdx.x; tid < T; tid += blockDim.x) {                                  
-            float maskv = (float) static_cast<float>(_Ldg(cur_mask + tid));   
-            maskv = 0;                
-            cur_out[tid] = (Tout)(_Exp((float)__ldg_ver_ctrl(cur_in + tid) - log_sum) *   
-                            (float)(1.0f - maskv));                                             
-        }                                                                                           
+template <typename T, typename acc_t, int log2_ceil>
+__global__ void SoftmaxWarpImpl(const T* X, T* Y, int o_dim, int i_dim) {
+    constexpr int next_power_of_two = 1 << log2_ceil;
+    constexpr int WARP_SIZE = (next_power_of_two < GPU_WARP_SIZE) ? next_power_of_two : GPU_WARP_SIZE;
+    constexpr int WARP_ITERATIONS = next_power_of_two / WARP_SIZE;
+    constexpr int WARP_BATCH = (next_power_of_two <= 128) ? 2 : 1;
+
+    int first_batch = (blockDim.y * blockIdx.x + threadIdx.y) * WARP_BATCH;
+
+    int local_batches = o_dim - first_batch;
+    if (local_batches > WARP_BATCH)
+        local_batches = WARP_BATCH;
+
+    int tid = threadIdx.x;
+
+    uint offset = first_batch * i_dim + tid;
+    X += offset;
+    Y += offset;
+
+    acc_t x[WARP_BATCH][WARP_ITERATIONS] {-80.0f};
+    #pragma unroll
+    for (int i = 0;  i < WARP_BATCH;  ++i) {
+        int batch_element_count = (i >= local_batches) ? 0 : i_dim;
+        #pragma unroll
+        for (int j = 0;  j < WARP_ITERATIONS;  ++j) {
+            int element_index = tid + j * WARP_SIZE;
+            if (element_index < batch_element_count) {
+                x[i][j] = X[i * i_dim + j * WARP_SIZE];
+            }
+        }
+    }
+
+    acc_t max_value[WARP_BATCH];
+    #pragma unroll
+    for (int i = 0;  i < WARP_BATCH;  ++i) {
+        max_value[i] = x[i][0];
+        #pragma unroll
+        for (int j = 1;  j < WARP_ITERATIONS;  ++j) {
+            max_value[i] = (max_value[i] > x[i][j]) ? max_value[i] : x[i][j];
+        }
+    }
+    #pragma unroll
+    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
+    #pragma unroll
+        for (int i = 0; i < WARP_BATCH; ++i) {
+            acc_t b = __shfl_xor_sync(0xffffffff, max_value[i], offset);
+            max_value[i] = (max_value[i] > b) ? max_value[i] : b;
+        }
+    }
+
+    acc_t sum[WARP_BATCH] { 0.0f };
+    #pragma unroll
+    for (int i = 0;  i < WARP_BATCH;  ++i) {
+        #pragma unroll
+        for (int j = 0;  j < WARP_ITERATIONS;  ++j) {
+            x[i][j] = std::exp(x[i][j] - max_value[i]);
+            sum[i] += x[i][j];
+        }
+    }
+    #pragma unroll
+    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
+    #pragma unroll
+        for (int i = 0; i < WARP_BATCH; ++i) {
+            sum[i] += __shfl_xor_sync(0xffffffff, sum[i], offset);
+        }
     }
 
 
-template <typename Tin, typename Tout>                                                              
-__global__ void SoftmaxScoreKernel64Mask(                                                    
-    const Tin* in, const bool* key_padding_mask, Tout* out,                                        
-    const int mask_scale, const int T) {                                                        
-        auto cur_in = in + blockIdx.x * T;                                                          
-        auto cur_out = out + blockIdx.x * T;                                                        
-        auto cur_mask = key_padding_mask + blockIdx.x / mask_scale * T;                                                  
-        __shared__ float sm[2];                                                                  
-        float log_sum = CudaLogZero<float>();                                                 
-        for (auto tid = threadIdx.x; tid < T; tid += blockDim.x) {                                  
-            float maskv = (float) static_cast<float>(_Ldg(cur_mask + tid));
-            maskv = 0; 
-            log_sum =                                                                               
-                    _LogAdd((float)__ldg_ver_ctrl(cur_in + tid) * ((float)1.0f - maskv) +              
-                            CudaLogZero<float>() * maskv, log_sum);                              
-        }                                                                                           
-        auto lane_id = threadIdx.x & 0x1f;                                                          
-        auto wid = threadIdx.x >> 5;                                                                
-        log_sum = WarpReduceLogAddSum(log_sum);                                                     
-        if(lane_id == 0) {                                                                          
-            sm[wid] = log_sum;                                                                      
-        }                                                                                           
-        __syncthreads();                                                                            
-        if (lane_id == 0) {                                                                         
-            log_sum = _LogAdd(sm[0], sm[1]);                                                        
-        }                                                                                           
-        __syncthreads();                                                                            
-        log_sum = WARP_SHFL(log_sum, 0);                                                            
-        for (auto tid = threadIdx.x; tid < T; tid += blockDim.x) {                                  
-            float maskv = (float) static_cast<float>(_Ldg(cur_mask + tid));  
-            maskv = 0;                  
-            cur_out[tid] = (Tout)(_Exp((float)__ldg_ver_ctrl(cur_in + tid) - log_sum) *                   
-                            (float)(1.0f - maskv));                                              
-        }                                                                                           
+    #pragma unroll
+    for (int i = 0; i < WARP_BATCH; ++i) {
+        sum[i] = 1.f / sum[i];
     }
 
-
-
-
-template<typename Tin, typename Tout>
-__global__ void SoftmaxScoreKernel32(const Tin* in, Tout* out, const int T) {
-    auto cur_in = in + blockIdx.x * T;
-    auto cur_out = out + blockIdx.x * T;
-    // reduce log sum
-    float log_sum = CudaLogZero<float>();
-    for(auto tid = threadIdx.x; tid < T; tid += blockDim.x) {
-        log_sum = _LogAdd((float)__ldg_ver_ctrl(cur_in + tid), log_sum);
-    }
-    log_sum = WarpReduceLogAddSum(log_sum);
-    for(auto tid = threadIdx.x; tid < T; tid += blockDim.x) {
-        cur_out[tid] = _Exp((float)__ldg_ver_ctrl(cur_in + tid) - log_sum);
+    // store result
+    #pragma unroll
+    for (int i = 0;  i < WARP_BATCH;  ++i) {
+        if (i >= local_batches)
+            break;
+        #pragma unroll
+        for (int j = 0;  j < WARP_ITERATIONS;  ++j) {
+            int element_index = tid + j * WARP_SIZE;
+            if (element_index < i_dim) {
+                Y[i*i_dim+j*WARP_SIZE] =  x[i][j] * sum[i];
+            } else {
+                break;
+            }
+        }
     }
 }
 
-template<typename Tin, typename Tout>
-__global__ void SoftmaxScoreKernel64(const Tin* in, Tout* out, const int T) {
-    auto cur_in = in + blockIdx.x * T;
-    auto cur_out = out + blockIdx.x * T;
-    __shared__ float sm[2];
-    // reduce log sum
-    float log_sum = CudaLogZero<float>();
-    for(auto tid = threadIdx.x; tid < T; tid += blockDim.x) {
-        log_sum = _LogAdd((float)__ldg_ver_ctrl(cur_in + tid), log_sum);
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int block_size>
+__global__ void SoftmaxBlockSMemImpl(LOAD load, STORE store, const int64_t rows,
+                                     const int64_t cols) {
+  extern __shared__ __align__(sizeof(double)) unsigned char shared_buf[];
+  __shared__ ComputeType row_sum_r;
+  auto* buf = reinterpret_cast<ComputeType*>(shared_buf);
+  const int tid = threadIdx.x;
+  const int num_packs = cols / pack_size;
+  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
+    ComputeType thread_max = -80.0f;
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+      load.template load<pack_size>(pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        buf[i * num_packs + pack_id] = pack[i];
+        thread_max = max(thread_max, pack[i]);
+      }
     }
-    auto lane_id = threadIdx.x & 0x1f;
-    auto wid = threadIdx.x >> 5;
-    log_sum = WarpReduceLogAddSum(log_sum);
-    if(lane_id == 0) {
-        sm[wid] = log_sum;
+    const ComputeType row_max = BlockAllReduce<MaxOp, ComputeType, block_size>(thread_max);
+    ComputeType thread_sum = 0;
+    for (int col = tid; col < cols; col += block_size) {
+        const ComputeType exp_x = std::exp(buf[col] - row_max);
+        buf[col] = exp_x;
+        thread_sum += exp_x;
     }
+    const ComputeType row_sum = BlockAllReduce<SumOp, ComputeType, block_size>(thread_sum);
+    
+    if(threadIdx.x == 0) row_sum_r = 1.f / row_sum;
     __syncthreads();
-    if (lane_id == 0) {
-        log_sum = _LogAdd(sm[0], sm[1]);
+
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+          pack[i] = buf[i * num_packs + pack_id] * row_sum_r;
+      }
+      store.template store<pack_size>(pack, row, pack_id * pack_size);
     }
+  }
+}
+
+template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int block_size>
+__global__ void SoftmaxBlockUncachedImpl(LOAD load, STORE store, const int64_t rows,
+                                         const int64_t cols) {
+  const int tid = threadIdx.x;
+  const int num_packs = cols / pack_size;
+  __shared__ ComputeType row_sum_r;
+  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
+    ComputeType thread_max = -80.0f;
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+      load.template load<pack_size>(pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) { thread_max = max(thread_max, pack[i]); }
+    }
+    const ComputeType row_max = BlockAllReduce<MaxOp, ComputeType, block_size>(thread_max);
+    ComputeType thread_sum = 0;
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+      load.template load<pack_size>(pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) { thread_sum += std::exp(pack[i] - row_max); }
+    }
+    const ComputeType row_sum = BlockAllReduce<SumOp, ComputeType, block_size>(thread_sum);
+    if(threadIdx.x == 0) row_sum_r = 1.f / row_sum;
     __syncthreads();
-    log_sum = WARP_SHFL(log_sum, 0);
-    for(auto tid = threadIdx.x; tid < T; tid += blockDim.x) {
-        cur_out[tid] = _Exp((float)__ldg_ver_ctrl(cur_in + tid) - log_sum);
+    for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
+      ComputeType pack[pack_size];
+      load.template load<pack_size>(pack, row, pack_id * pack_size);
+#pragma unroll
+      for (int i = 0; i < pack_size; ++i) {
+        pack[i] = std::exp(pack[i] - row_max) * row_sum_r;
+      }
+      store.template store<pack_size>(pack, row, pack_id * pack_size);
     }
+  }
 }
 
 /*
@@ -256,37 +320,105 @@ par:
     in & out : [BHTT]
     key_padding_mask : [B, H, T, T] or [B, 1, T, T] or [B, 1, 1, T], or [1, 1, T, T]
 */
-template<typename Tin, typename Tout>
+template<typename T, int pack_size>
 ppl::common::RetCode PPLCUDAFastSoftmaxForwardImp(
     cudaStream_t stream,
-    const Tin* input,
-    Tout* output,
+    const T* input,
+    T* output,
     const bool* key_padding_mask,
     const int mask_scale,
-    const int outer,
-    const int inner)
+    const int outer_dim,
+    const int inner_dim)
 {
-    dim3 grid(outer, 1, 1);
-    if (key_padding_mask != nullptr) {
-        if(outer < 512) {
-            dim3 block(32);
-            SoftmaxScoreKernel32Mask<Tin, Tout>
-                <<<grid, block, 0, stream>>>(input, key_padding_mask, output, mask_scale, inner);
-        } else {
-            dim3 block(64);
-            SoftmaxScoreKernel64Mask<Tin, Tout>
-                <<<grid, block, 0, stream>>>(input, key_padding_mask, output, mask_scale, inner);
+    using ComputeType = typename DefaultComputeType<T>::type;
+    DirectLoad<T, ComputeType> load(input, inner_dim);
+    DirectStore<ComputeType, T> store(output, inner_dim);
+
+    if(inner_dim <= 1024)
+	{
+        int log2_ceil = 0;
+        while((1 << log2_ceil) < inner_dim) log2_ceil++;
+        const int next_power_of_two = 1 << log2_ceil;
+
+
+        int warp_size = (next_power_of_two < GPU_WARP_SIZE) ? next_power_of_two : GPU_WARP_SIZE;
+
+        int batches_per_warp = (next_power_of_two <= 128) ? 2 : 1;
+
+        // use 128 threads per block to maximimize gpu utilization
+        constexpr int threads_per_block = 128;
+
+        int warps_per_block = (threads_per_block / warp_size);
+        int batches_per_block = warps_per_block * batches_per_warp;
+        int gridSize = (outer_dim + batches_per_block - 1) / batches_per_block;
+		dim3 blockSize(warp_size, warps_per_block, 1);
+
+        switch(log2_ceil) {
+            case 0:
+                SoftmaxWarpImpl<T,ComputeType,0><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 1:
+                SoftmaxWarpImpl<T,ComputeType,1><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 2:
+                SoftmaxWarpImpl<T,ComputeType,2><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 3:
+                SoftmaxWarpImpl<T,ComputeType,3><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 4:
+                SoftmaxWarpImpl<T,ComputeType,4><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 5:
+                SoftmaxWarpImpl<T,ComputeType,5><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 6:
+                SoftmaxWarpImpl<T,ComputeType,6><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 7:
+                SoftmaxWarpImpl<T,ComputeType,7><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 8:
+                SoftmaxWarpImpl<T,ComputeType,8><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 9:
+                SoftmaxWarpImpl<T,ComputeType,9><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            case 10:
+                SoftmaxWarpImpl<T,ComputeType,10><<<gridSize, blockSize, 0, stream>>>(
+                        input, output, outer_dim, inner_dim);
+                break;
+            default:
+                break;
         }
-    } else {
-        if (outer < 512) {
-            dim3 block(32);
-            SoftmaxScoreKernel32<Tin, Tout>
-                <<<grid, block, 0, stream>>>(input, output, inner);
-        } else {
-            dim3 block(64);
-            SoftmaxScoreKernel64<Tin, Tout>
-                <<<grid, block, 0, stream>>>(input, output, inner);
+		
+	} else {
+        int grid = outer_dim;
+        constexpr int block_size_conf = 256;
+        const size_t smem = inner_dim * sizeof(ComputeType);
+        int max_active_blocks_conf_1;
+        {
+            cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+                &max_active_blocks_conf_1,
+                SoftmaxBlockSMemImpl<decltype(load), decltype(store), ComputeType, pack_size, block_size_conf>,
+                block_size_conf, smem);
+            if (err != cudaSuccess) { LOG(ERROR) << "cudaOccupancyMaxActiveBlocksPerMultiprocessor error"; }
         }
+        if (max_active_blocks_conf_1 <= 0) {
+            SoftmaxBlockUncachedImpl<decltype(load), decltype(store), ComputeType, pack_size, 1024><<<grid, 1024, 0, stream>>>(load, store, outer_dim, inner_dim);
+        }
+
+        SoftmaxBlockSMemImpl<decltype(load),decltype(store),ComputeType,pack_size,block_size_conf><<<grid, block_size_conf, smem, stream>>>(load, store, outer_dim, inner_dim);
     }
     return ppl::common::RC_SUCCESS;
 }
@@ -297,18 +429,32 @@ ppl::common::RetCode PPLCUDAFastSoftmax(
     const void* input,
     const ppl::common::TensorShape* output_shape,
     void* output,
-    const void* key_padding_mask) {
-        int dim_cnt = input_shape->GetDimCount();
-        int outer = 1;
-        int inner = input_shape->GetDim(dim_cnt - 1);
-        for(int i = 0; i < dim_cnt - 1; i++) {
-            outer *= input_shape->GetDim(i);
-        }
-        int mask_scale = outer / input_shape->GetDim(0);
-        if(output_shape->GetDataType() == 5)  {
-            return PPLCUDAFastSoftmaxForwardImp<half, half>(stream, (const half*)input, (half*)output, (const bool*)key_padding_mask, mask_scale, outer, inner);
-        } else if(output_shape->GetDataType() == 6) {
-            return PPLCUDAFastSoftmaxForwardImp<float, float>(stream, (const float*)input, (float*)output, (const bool*)key_padding_mask, mask_scale, outer, inner);
-        }
-        return ppl::common::RC_UNSUPPORTED;
+    const void* key_padding_mask) 
+{
+    int dim_cnt = input_shape->GetDimCount();
+    int outer_dim = 1;
+    int inner_dim = input_shape->GetDim(dim_cnt - 1);
+    for(int i = 0; i < dim_cnt - 1; i++) {
+        outer_dim *= input_shape->GetDim(i);
     }
+    int mask_scale = outer_dim / input_shape->GetDim(0);
+    switch(output_shape->GetDataType()) {
+        case ppl::common::DATATYPE_FLOAT32: {
+            if (inner_dim % 2 == 0)
+                PPLCUDAFastSoftmaxForwardImp<float, 2>(stream, (const float*)input, (float*)output, (const bool*)key_padding_mask, mask_scale, outer_dim, inner_dim);
+            else
+                PPLCUDAFastSoftmaxForwardImp<float, 1>(stream, (const float*)input, (float*)output, (const bool*)key_padding_mask, mask_scale, outer_dim, inner_dim);
+            break;
+        }
+        case ppl::common::DATATYPE_FLOAT16: {
+            if (inner_dim % 2 == 0)
+                PPLCUDAFastSoftmaxForwardImp<half, 2>(stream, (const half*)input, (half*)output, (const bool*)key_padding_mask, mask_scale, outer_dim, inner_dim);
+            else
+                PPLCUDAFastSoftmaxForwardImp<half, 1>(stream, (const half*)input, (half*)output, (const bool*)key_padding_mask, mask_scale, outer_dim, inner_dim);
+            break;
+        }
+        default:
+            break;
+    }
+    return ppl::common::RC_UNSUPPORTED;
+}

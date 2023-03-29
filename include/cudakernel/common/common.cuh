@@ -5,6 +5,111 @@
 #include <math.h>
 #include <memory>
 
+#include <cub/cub.cuh>
+
+#define GPU_WARP_SIZE 32
+
+template<typename T>
+struct DefaultComputeType {
+  using type = T;
+};
+
+template<>
+struct DefaultComputeType<half> {
+  using type = float;
+};
+
+template<typename T, int N>
+struct GetPackType {
+  using type = typename std::aligned_storage<N * sizeof(T), N * sizeof(T)>::type;
+};
+
+template<typename T, int N>
+using PackType = typename GetPackType<T, N>::type;
+
+template<typename T, int N>
+union Pack {
+  static_assert(sizeof(PackType<T, N>) == sizeof(T) * N, "");
+  __device__ Pack() {
+    // do nothing
+  }
+  PackType<T, N> storage;
+  T elem[N];
+};
+
+template<typename SRC, typename DST>
+struct DirectLoad {
+  DirectLoad(const SRC* src, int64_t row_size) : src(src), row_size(row_size) {}
+  template<int N>
+  __device__ void load(DST* dst, int64_t row, int64_t col) const {
+    Pack<SRC, N> pack;
+    const int64_t offset = (row * row_size + col) / N;
+    pack.storage = *(reinterpret_cast<const PackType<SRC, N>*>(src) + offset);
+#pragma unroll
+    for (int i = 0; i < N; ++i) { dst[i] = static_cast<DST>(pack.elem[i]); }
+  }
+  const SRC* src;
+  int64_t row_size;
+};
+
+template<typename SRC, typename DST>
+struct DirectStore {
+  DirectStore(DST* dst, int64_t row_size) : dst(dst), row_size(row_size) {}
+  template<int N>
+  __device__ void store(const SRC* src, int64_t row, int64_t col) {
+    Pack<DST, N> pack;
+    const int64_t offset = (row * row_size + col) / N;
+#pragma unroll
+    for (int i = 0; i < N; ++i) { pack.elem[i] = static_cast<DST>(src[i]); }
+    *(reinterpret_cast<PackType<DST, N>*>(dst) + offset) = pack.storage;
+  }
+  DST* dst;
+  int64_t row_size;
+};
+
+template<typename T>
+struct SumOp {
+  __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a + b; }
+};
+
+template<typename T>
+struct MaxOp {
+  __device__ __forceinline__ T operator()(const T& a, const T& b) const { return max(a, b); }
+};
+
+template<template<typename> class ReductionOp, typename T, int block_size>
+__inline__ __device__ T BlockAllReduce(T val) {
+  typedef cub::BlockReduce<T, block_size> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+  __shared__ T result_broadcast;
+  T result = BlockReduce(temp_storage).Reduce(val, ReductionOp<T>());
+  if (threadIdx.x == 0) { result_broadcast = result; }
+  __syncthreads();
+  return result_broadcast;
+}
+
+inline cudaError_t GetNumBlocks(int64_t block_size, int64_t max_blocks, int64_t waves,
+                                int* num_blocks) {
+  int dev;
+  {
+    cudaError_t err = cudaGetDevice(&dev);
+    if (err != cudaSuccess) { return err; }
+  }
+  int sm_count;
+  {
+    cudaError_t err = cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev);
+    if (err != cudaSuccess) { return err; }
+  }
+  int tpm;
+  {
+    cudaError_t err = cudaDeviceGetAttribute(&tpm, cudaDevAttrMaxThreadsPerMultiProcessor, dev);
+    if (err != cudaSuccess) { return err; }
+  }
+  *num_blocks =
+      std::max<int>(1, std::min<int64_t>(max_blocks, sm_count * tpm / block_size * waves));
+  return cudaSuccess;
+}
+
 template<typename T>
 __device__ __forceinline__ T _Exp(T a);
 
