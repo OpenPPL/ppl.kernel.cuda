@@ -107,7 +107,7 @@ inline cudaError_t GetNumBlocks(int64_t block_size, int64_t max_blocks, int64_t 
     if (err != cudaSuccess) { return err; }
   }
   *num_blocks =
-      std::max<int>(1, std::min<int64_t>(max_blocks, sm_count * tpm / block_size * waves));
+      max<int>(1, min<int64_t>(max_blocks, sm_count * tpm / block_size * waves));
   return cudaSuccess;
 }
 
