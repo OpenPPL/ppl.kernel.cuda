@@ -165,7 +165,7 @@ __global__ void SoftmaxWarpImpl(const T* X, T* Y, int o_dim, int i_dim) {
     X += offset;
     Y += offset;
 
-    acc_t x[WARP_BATCH][WARP_ITERATIONS] {-80.0f};
+    acc_t x[WARP_BATCH][WARP_ITERATIONS];
     #pragma unroll
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         int batch_element_count = (i >= local_batches) ? 0 : i_dim;
@@ -174,6 +174,8 @@ __global__ void SoftmaxWarpImpl(const T* X, T* Y, int o_dim, int i_dim) {
             int element_index = tid + j * WARP_SIZE;
             if (element_index < batch_element_count) {
                 x[i][j] = X[i * i_dim + j * WARP_SIZE];
+            } else {
+                x[i][j] = -80.0f;
             }
         }
     }
@@ -205,6 +207,7 @@ __global__ void SoftmaxWarpImpl(const T* X, T* Y, int o_dim, int i_dim) {
             sum[i] += x[i][j];
         }
     }
+
     #pragma unroll
     for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
     #pragma unroll
@@ -212,7 +215,7 @@ __global__ void SoftmaxWarpImpl(const T* X, T* Y, int o_dim, int i_dim) {
             sum[i] += __shfl_xor_sync(0xffffffff, sum[i], offset);
         }
     }
-
+    
 
     #pragma unroll
     for (int i = 0; i < WARP_BATCH; ++i) {
@@ -456,5 +459,5 @@ ppl::common::RetCode PPLCUDAFastSoftmax(
         default:
             break;
     }
-    return ppl::common::RC_UNSUPPORTED;
+    return ppl::common::RC_SUCCESS;
 }

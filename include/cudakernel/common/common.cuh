@@ -202,6 +202,13 @@ __device__ __forceinline__ T WarpReduceSum(T val) {
 }
 
 template<typename T>
+__device__ __forceinline__ T WarpReduceMax(T val) {
+    for (int mask = 16; mask > 0; mask >>= 1)
+        val = max(WARP_SHFL_XOR(val, mask, 32, FINAL_MASK), val);
+    return val;
+}
+
+template<typename T>
 __device__ __forceinline__ T WarpReduceLogAddSum(T val) {
     for (int mask = 16; mask > 0; mask >>= 1)
         val = _LogAdd(WARP_SHFL_XOR(val, mask, 32, FINAL_MASK), val);
@@ -222,6 +229,25 @@ __forceinline__ __device__ T blockReduceSum(T val) {
   if (wid == 0) {
       val = (threadIdx.x < ((blockDim.x + 31) >> 5)) ? shared[lane] : (T)0.0f;
       val = WarpReduceSum<T>(val);
+      return val;
+  }
+  return (T)0.0f;
+}
+
+template <typename T>
+__forceinline__ __device__ T blockReduceMax(T val) {
+  static __shared__ T shared[32];
+  int lane = threadIdx.x & 0x1f;
+  int wid = threadIdx.x >> 5;
+
+  val = WarpReduceMax<T>(val);
+
+  if (lane == 0) shared[wid] = val;
+  __syncthreads();
+
+  if (wid == 0) {
+      val = (threadIdx.x < ((blockDim.x + 31) >> 5)) ? shared[lane] : (T)-99999;
+      val = WarpReduceMax<T>(val);
       return val;
   }
   return (T)0.0f;
