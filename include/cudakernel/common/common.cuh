@@ -5,8 +5,6 @@
 #include <math.h>
 #include <memory>
 
-#include <cub/cub.cuh>
-
 #define GPU_WARP_SIZE 32
 
 template<typename T>
@@ -67,26 +65,29 @@ struct DirectStore {
   int64_t row_size;
 };
 
-template<typename T>
-struct SumOp {
-  __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a + b; }
-};
+#if (__CUDACC_VER_MAJOR__ >= 11)
+  #include <cub/cub.cuh>
+  template<typename T>
+  struct SumOp {
+    __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a + b; }
+  };
 
-template<typename T>
-struct MaxOp {
-  __device__ __forceinline__ T operator()(const T& a, const T& b) const { return max(a, b); }
-};
+  template<typename T>
+  struct MaxOp {
+    __device__ __forceinline__ T operator()(const T& a, const T& b) const { return max(a, b); }
+  };
 
-template<template<typename> class ReductionOp, typename T, int block_size>
-__inline__ __device__ T BlockAllReduce(T val) {
-  typedef cub::BlockReduce<T, block_size> BlockReduce;
-  __shared__ typename BlockReduce::TempStorage temp_storage;
-  __shared__ T result_broadcast;
-  T result = BlockReduce(temp_storage).Reduce(val, ReductionOp<T>());
-  if (threadIdx.x == 0) { result_broadcast = result; }
-  __syncthreads();
-  return result_broadcast;
-}
+  template<template<typename> class ReductionOp, typename T, int block_size>
+  __inline__ __device__ T BlockAllReduce(T val) {
+    typedef cub::BlockReduce<T, block_size> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+    __shared__ T result_broadcast;
+    T result = BlockReduce(temp_storage).Reduce(val, ReductionOp<T>());
+    if (threadIdx.x == 0) { result_broadcast = result; }
+    __syncthreads();
+    return result_broadcast;
+  }
+#endif
 
 inline cudaError_t GetNumBlocks(int64_t block_size, int64_t max_blocks, int64_t waves,
                                 int* num_blocks) {
