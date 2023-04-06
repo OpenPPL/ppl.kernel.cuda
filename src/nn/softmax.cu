@@ -242,6 +242,7 @@ __global__ void SoftmaxWarpImpl(const T* X, T* Y, int o_dim, int i_dim) {
 template<typename LOAD, typename STORE, typename ComputeType, int pack_size, int block_size>
 __global__ void SoftmaxBlockSMemImpl(LOAD load, STORE store, const int64_t rows,
                                      const int64_t cols) {
+
   extern __shared__ __align__(sizeof(double)) unsigned char shared_buf[];
   __shared__ ComputeType row_sum_r;
   auto* buf = reinterpret_cast<ComputeType*>(shared_buf);
@@ -258,15 +259,22 @@ __global__ void SoftmaxBlockSMemImpl(LOAD load, STORE store, const int64_t rows,
         thread_max = max(thread_max, pack[i]);
       }
     }
-    const ComputeType row_max = BlockAllReduce<MaxOp, ComputeType, block_size>(thread_max);
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        const ComputeType row_max = BlockAllReduce<MaxOp, ComputeType, block_size>(thread_max);
+    #else
+        const ComputeType row_max = blockReduceMax<ComputeType>(thread_max);
+    #endif
     ComputeType thread_sum = 0;
     for (int col = tid; col < cols; col += block_size) {
         const ComputeType exp_x = std::exp(buf[col] - row_max);
         buf[col] = exp_x;
         thread_sum += exp_x;
     }
-    const ComputeType row_sum = BlockAllReduce<SumOp, ComputeType, block_size>(thread_sum);
-    
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        const ComputeType row_sum = BlockAllReduce<SumOp, ComputeType, block_size>(thread_sum);
+    #else
+        const ComputeType row_sum = blockReduceSum<ComputeType>(thread_sum);
+    #endif
     if(threadIdx.x == 0) row_sum_r = 1.f / row_sum;
     __syncthreads();
 
@@ -295,7 +303,11 @@ __global__ void SoftmaxBlockUncachedImpl(LOAD load, STORE store, const int64_t r
 #pragma unroll
       for (int i = 0; i < pack_size; ++i) { thread_max = max(thread_max, pack[i]); }
     }
-    const ComputeType row_max = BlockAllReduce<MaxOp, ComputeType, block_size>(thread_max);
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        const ComputeType row_max = BlockAllReduce<MaxOp, ComputeType, block_size>(thread_max);
+    #else
+        const ComputeType row_max = blockReduceMax<ComputeType>(thread_max);
+    #endif
     ComputeType thread_sum = 0;
     for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
       ComputeType pack[pack_size];
@@ -303,7 +315,11 @@ __global__ void SoftmaxBlockUncachedImpl(LOAD load, STORE store, const int64_t r
 #pragma unroll
       for (int i = 0; i < pack_size; ++i) { thread_sum += std::exp(pack[i] - row_max); }
     }
-    const ComputeType row_sum = BlockAllReduce<SumOp, ComputeType, block_size>(thread_sum);
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        const ComputeType row_sum = BlockAllReduce<SumOp, ComputeType, block_size>(thread_sum);
+    #else
+        const ComputeType row_sum = blockReduceSum<ComputeType>(thread_sum);
+    #endif
     if(threadIdx.x == 0) row_sum_r = 1.f / row_sum;
     __syncthreads();
     for (int pack_id = tid; pack_id < num_packs; pack_id += block_size) {
