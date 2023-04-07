@@ -27,6 +27,23 @@
 #include "../reformat/cvt_int8_float.cuh"
 #include "ppl/common/log.h"
 
+#define _HLAF_MIN -65504
+#define _FLT_MIN  -3.40282346638528859811704183484516925e+38F
+
+template <typename T>
+T get_min();
+
+template <>
+inline __host__ __device__ float get_min<float>()
+{
+    return _FLT_MIN;
+}
+template <>
+inline __host__ __device__ half get_min<half>()
+{
+    return _HLAF_MIN;
+}
+
 template <typename T>
 __device__ inline T __ldg_ver_ctrl(T* ptr) {
 #if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
@@ -175,7 +192,7 @@ __global__ void SoftmaxWarpImpl(const T* X, T* Y, int o_dim, int i_dim) {
             if (element_index < batch_element_count) {
                 x[i][j] = X[i * i_dim + j * WARP_SIZE];
             } else {
-                x[i][j] = -80.0f;
+                x[i][j] = get_min<acc_t>();
             }
         }
     }
