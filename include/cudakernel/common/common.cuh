@@ -4,6 +4,7 @@
 #include <float.h>
 #include <math.h>
 #include <memory>
+#include <algorithm>
 
 #define GPU_WARP_SIZE 32
 
