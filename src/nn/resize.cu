@@ -634,6 +634,7 @@ __global__ void ppl_cukernel_resize_cubic(
 
 static inline float hostComputeAreaScale(int input_size, int output_size, int mode)
 {
+    if (input_size == output_size) return 1.f;
     if (mode == 2) {
         return float(input_size - 1) / (output_size - 1);
     } else if (mode == 1 && output_size <= 1) {
@@ -663,14 +664,16 @@ ppl::common::RetCode ppl_resize_forward(
 {
     if (transform_mode == 5) return ppl::common::RC_UNSUPPORTED;
     int dim_count  = output_shape->GetDimCount();
-    int out_height = 1, out_width = 1;
-    int in_height = 1, in_width = 1;
-    for (int it = 2; it < dim_count - 1; ++it) {
+    int out_height = output_shape->GetDim(2), out_width = 1;
+    int in_height = input_shape->GetDim(2), in_width = 1;
+    for (int it = 3; it < dim_count - 1; ++it) {
         out_height *= output_shape->GetDim(it);
         in_height *= input_shape->GetDim(it);
     }
-    out_width    = output_shape->GetDim(dim_count - 1);
-    in_width     = input_shape->GetDim(dim_count - 1);
+    if (dim_count >= 4) {
+        out_width    = output_shape->GetDim(dim_count - 1);
+        in_width     = input_shape->GetDim(dim_count - 1);
+    }
     int channels = output_shape->GetDim(0) * output_shape->GetDim(1);
 
     float h_scale = 0.f, w_scale = 0.f;
