@@ -220,6 +220,28 @@ ppl::common::RetCode PPLCUDAConcatNoPaddingForwardImp(
             axis_offset += (input_axis_width);                                                                         
         }        
         return ppl::common::RC_SUCCESS;
+    } else if (output_shape->GetDataType() == ppl::common::DATATYPE_FLOAT16 && output_shape->GetDataFormat() == ppl::common::DATAFORMAT_NHWC8) {
+        output_axis_width = output_axis_width >> 3;                                                    
+        for (int j = 0; j < num_inputs; ++j) {                                                                       
+            int input_axis_width = (input_dims[j][axis] >> 3);                                                              
+            int num_in_elems     = num_elems * input_axis_width;
+            if (!(mask & (1 << j))) {                                                                                
+                if (num_in_elems > 0) {                                                                              
+                    DivModFast num_elems_inner_fast = DivModFast(input_axis_width);                                  
+                    int block_size                  = 256;                                                           
+                    int grid_size                   = (num_in_elems + block_size - 1) / block_size;                  
+                    ppl_cukernel_concat_nhwc_nopadding<<<grid_size, block_size, 0, stream>>>(num_in_elems,           
+                                                                                             (const float4*)inputs[j], 
+                                                                                             num_in_elems,           
+                                                                                             output_axis_width,      
+                                                                                             num_elems_inner_fast,   
+                                                                                             axis_offset,            
+                                                                                             (float4*)output);         
+                }                                                                                                    
+            }                                                                                                        
+            axis_offset += (input_axis_width);                                                                         
+        }        
+        return ppl::common::RC_SUCCESS;
     }
 
 #define SWITCH_CASE(TYPE)                                                                                            \
