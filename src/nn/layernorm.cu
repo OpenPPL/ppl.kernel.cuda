@@ -3,162 +3,154 @@
 #include <cuda_fp16.h>
 #include "cudakernel/common/common.cuh"
 
-#define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
-// 4 使用float4 读入 + shared mem 保存
-__global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp32_float4(
-    const float* input, const float* scale, const float* shift, float* output,
-    int B, int N, bool has_affine, float eps) {
-    // N = 256, blockDim.x = 64
-    int tid = threadIdx.x;
-    float* cur_in = const_cast<float*>(input + blockIdx.x * N);
-    float* cur_out = output + blockIdx.x * N;
-    float sumx=0.0f;
-    float sumy=0.0f;
-    __shared__ float data[256];
+template <int VPT>
+struct BytesToType;
 
-    float4 v =  FETCH_FLOAT4(cur_in[4*tid]);
-    data[4*tid] = v.x;
-    data[4*tid+1] = v.y;
-    data[4*tid+2] = v.z;
-    data[4*tid+3] = v.w;
+template <>
+struct BytesToType<2>
+{
+    using type = uint16_t;
+};
+template <>
+struct BytesToType<4>
+{
+    using type = uint32_t;
+};
+template <>
+struct BytesToType<8>
+{
+    using type = uint64_t;
+};
+template <>
+struct BytesToType<16>
+{
+    using type = float4;
+};
 
-    sumx = v.x + v.y + v.z + v.w;
-    sumy = v.x * v.x + v.y*v.y + v.z*v.z + v.w*v.w;
-    //BlockReduceSum
-    float sumx_ = BlockReduceSum(sumx);
-    float sumy_ = BlockReduceSum(sumy);
-    float mean = sumx_ / N;
-    float rstd = rsqrtf(sumy_ / N - mean * mean + eps);
-    float4 val;
-    val.x = (data[4*tid+0] - mean) * rstd;
-    val.y = (data[4*tid+1] - mean) * rstd;
-    val.z = (data[4*tid+2] - mean) * rstd;
-    val.w = (data[4*tid+3] - mean) * rstd;
-    if(has_affine){
-        val.x = val.x * (float)scale[4*tid+0] + (float)shift[4*tid+0];
-        val.y = val.y * (float)scale[4*tid+1] + (float)shift[4*tid+1];
-        val.z = val.z * (float)scale[4*tid+2] + (float)shift[4*tid+2];
-        val.w = val.w * (float)scale[4*tid+3] + (float)shift[4*tid+3];
-    }
+template <int Bytes>
+__device__ inline void copy(const void* local, void* data)
+{
+    using T = typename BytesToType<Bytes>::type;
 
-    FETCH_FLOAT4(cur_out[4*tid]) =  val;
+    const T* in = static_cast<const T*>(local);
+    T* out = static_cast<T*>(data);
+    *out = *in;
 }
 
 
-__global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp32_opt(
-    const float* input, const float* scale, const float* shift, float* output,
-    int B, int N, bool has_affine, float eps) {
+template <int VPT, int TPB>
+__global__ void LayernormForward_fp16(
+    const half *x,
+    const half *weight,
+    const half *bias,
+    const float eps,
+    const int32_t normalize_shape,
+    half *output
+){
+    const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
+    half inLocal[VPT]; half weightLocal[VPT]; half biasLocal[VPT];
+
+    copy<sizeof(half) * VPT>(&x[idx], inLocal);
+    half2 loc = __floats2half2_rn(0.f, 0.f); // accumulator
+    half r_normalize_shape = __float2half_rn(1 / (float)(normalize_shape));
+
+#pragma unroll
+    for (int32_t it = 0; it < VPT; it++)
+    {
+        loc.x = __hfma(r_normalize_shape, inLocal[it], loc.x); 
+        loc.y = __hfma(loc.x, inLocal[it], loc.y);
+    }
+
+    copy<sizeof(half) * VPT>(&bias[threadIdx.x * VPT], biasLocal);
+    copy<sizeof(half) * VPT>(&weight[threadIdx.x * VPT], weightLocal);
+    __shared__ half mu;     // mean
+    __shared__ half rsigma; // 1 / std.dev.
+    const half2 reduced = BlockAllReduce<SumOp, half2, TPB>(loc);
+
+    if (threadIdx.x == 0)
+    {
+        mu = __low2half(reduced);
+        rsigma = rsqrt(__high2half(reduced) - mu * mu + __float2half(eps));
+    }
+    __syncthreads();
+
+    half outLocal[VPT];
+#pragma unroll
+    for (int32_t it = 0; it < VPT; it++)
+    {
+        outLocal[it] = (inLocal[it] - mu) * rsigma * weightLocal[it] + biasLocal[it];
+    }
+    copy<sizeof(half) * VPT>(outLocal, &output[idx]);
+};
+
+template <int VPT, int TPB>
+__global__ void LayernormForward_fp32(
+    const float *x,
+    const float *weight,
+    const float *bias,
+    const float eps,
+    const int32_t normalize_shape,
+    float *output
+){
+    const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
+    float inLocal[VPT]; float weightLocal[VPT]; float biasLocal[VPT];
+
+    copy<sizeof(float) * VPT>(&x[idx], inLocal);
+    float2 loc = make_float2(0.f, 0.f); // accumulator
+    float r_normalize_shape = 1 / (float)(normalize_shape);
+
+#pragma unroll
+    for (int32_t it = 0; it < VPT; it++)
+    {
+        loc.x = fmaf(r_normalize_shape, inLocal[it], loc.x); 
+        loc.y = fmaf(loc.x, inLocal[it], loc.y);
+    }
+
+    copy<sizeof(float) * VPT>(&bias[threadIdx.x * VPT], biasLocal);
+    copy<sizeof(float) * VPT>(&weight[threadIdx.x * VPT], weightLocal);
+    __shared__ float mu;     // mean
+    __shared__ float rsigma; // 1 / std.dev.
+    const float reduced_x = BlockAllReduce<SumOp, float, TPB>(loc.x);
+    const float reduced_y = BlockAllReduce<SumOp, float, TPB>(loc.y);
+    if (threadIdx.x == 0)
+    {
+        mu = reduced_x;
+        rsigma = rsqrt(reduced_y - mu * mu + eps);
+    }
+    __syncthreads();
+
+    float outLocal[VPT];
+#pragma unroll
+    for (int32_t it = 0; it < VPT; it++)
+    {
+        outLocal[it] = (inLocal[it] - mu) * rsigma * weightLocal[it] + biasLocal[it];
+    }
+    copy<sizeof(float) * VPT>(outLocal, &output[idx]);
+};
+
+
+
+__global__ __launch_bounds__(256) void LayernormForwardDefault_fp16(
+    const half* input, const half* scale, const half* shift, half* output,
+    int N, bool has_affine, float eps) {
     auto cur_in = input + blockIdx.x * N;
     auto cur_out = output + blockIdx.x * N;
-    float sumx=0;
-    float sumy=0;
-    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x) {
-        float v = (float)cur_in[tid];
-        sumx += v;
-        sumy += v* v;
-    }
-    //BlockReduceSum
-    float sumx_ = BlockReduceSum(sumx);
-    float sumy_ = BlockReduceSum(sumy);
-    float mean = sumx_ / N;
-    float rstd = rsqrtf(sumy_ / N - mean * mean + eps);
-    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x) {
-        float val = ((float)cur_in[tid] - mean) * rstd;
-        if(has_affine){
-            val = val * (float)scale[tid] + (float)shift[tid];
-        }
-        cur_out[tid] =  val;
-    }
-}
-
-__global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp32(
-    const float* input, const float* weight, const float* bias, float* output,
-    int outer, int inner, bool has_affine, float eps) {
-    __shared__ float acc_val[256];
-    const int outer_idx = blockIdx.x;
-    const float* input_ptr = input + outer_idx * inner;
-    float* output_ptr = output + outer_idx * inner;
-
-    const unsigned int tid = threadIdx.x;
-    //! calculate mean_val
-    acc_val[tid] = 0.f;
-    for (int i = tid; i < inner; i += blockDim.x) {
-        acc_val[tid] += input_ptr[i];
-    }
-    __syncthreads();
-
-    unsigned int i = 1, j = 2;
-    while (j <= blockDim.x) {
-        if (tid % j == 0) {
-            acc_val[tid] += acc_val[tid + i];
-        }
-        i <<= 1; j <<= 1;
-        __syncthreads();
-    }
-    const float mean_val = acc_val[0] / inner;
-    __syncthreads();
-
-    acc_val[tid] = 0.f;
-    for (int i = tid; i < inner; i += blockDim.x) {
-        acc_val[tid] += (input_ptr[i] - mean_val) * (input_ptr[i] - mean_val);
-    }
-    __syncthreads();
-
-    i = 1; j = 2;
-    while (j <= blockDim.x) {
-        if (tid % j == 0) {
-            acc_val[tid] += acc_val[tid + i];
-        }
-        i <<= 1; j <<= 1;
-        __syncthreads();
-    }
-    float std = sqrtf(acc_val[0] / inner + eps);
-    float r_std = 1.0f / std;
-
-    if (has_affine) {
-        for (int i = tid; i < inner; i += blockDim.x) {
-            float weight_val = weight[tid]; float bias_val = bias[tid];
-            float out_val = weight_val * (input_ptr[i] - mean_val) * r_std  + bias_val;
-            // if(if_relu) out_val = (out_val > 0) ? out_val : 0;
-            output_ptr[i] =  out_val;
-        }
-    } else {
-        for (int i = tid; i < inner; i += blockDim.x) {
-            float out_val = (input_ptr[i] - mean_val) * r_std;
-            // if(if_relu) out_val = (out_val > 0) ? out_val : 0;
-            output_ptr[i] =  out_val;
-        }
-    }
-}
-__global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp16_float2(
-    const half* input, const half* scale, const half* shift, half* output,
-    int B, int N, bool has_affine, float eps) {
-        // outer=B inner=N
-        // N shoud be 256, blockDim.x = 64
-        // TODO add float2 opt
-#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
-#endif
-}
-
-__global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp16_opt(
-    const half* input, const half* scale, const half* shift, half* output,
-    int B, int N, bool has_affine, float eps) { // outer=B inner=N
-#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
-    auto cur_in = input + blockIdx.x * N;
-    auto cur_out = output + blockIdx.x * N;
-    float sumx = 0;
-    float sumy = 0;
+    float2 loc = make_float2(0.f, 0.f);
 
     for(auto tid = threadIdx.x; tid < N; tid += blockDim.x){
         float v = __half2float(cur_in[tid]);
-        sumx += v;
-        sumy += v * v;
+        loc.x += v;
+        loc.y += v * v;
     }
-    // BlockReduceSum;
-    float sumx_ = BlockReduceSum(sumx);
-    float sumy_ = BlockReduceSum(sumy);
-    float mean = sumx_ / N;
-    float rstd = rsqrtf(sumy_ / N - mean * mean + eps);
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        loc.x =  BlockAllReduce<SumOp, float, 256>(loc.x);
+        loc.y =  BlockAllReduce<SumOp, float, 256>(loc.y);
+    #else
+        BlockDoubleReduceSum(loc.x, loc.y);
+    #endif
+
+    float mean = loc.x / N;
+    float rstd = rsqrtf(loc.y / N - mean * mean + eps);
 
     half mean_h = __float2half(mean);
     half rstd_h = __float2half(rstd);
@@ -169,71 +161,39 @@ __global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp16_opt(
             val = val * scale[tid] + shift[tid];
         cur_out[tid] = val;
     }
-#endif
 }
-__global__ __launch_bounds__(256) void ppl3_cukernel_layernorm_fp16(
-    const half* input, const half* weight, const half* bias, half* output,
-    int outer, int inner, bool has_affine, float eps) {
-#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
-    __shared__ float acc_val[256];
-    const int outer_idx = blockIdx.x;
-    const half* input_ptr = input + outer_idx * inner;
-    half* output_ptr = output + outer_idx * inner;
 
-    const unsigned int tid = threadIdx.x;
-    //! calculate mean_val
-    acc_val[tid] = 0.f;
-    for (int i = tid; i < inner; i += blockDim.x) {
-        acc_val[tid] += __half2float(input_ptr[i]);
+
+
+__global__ __launch_bounds__(256) void LayernormForwardDefault_fp32(
+    const float* input, const float* scale, const float* shift, float* output,
+    int N, bool has_affine, float eps) {
+    auto cur_in = input + blockIdx.x * N;
+    auto cur_out = output + blockIdx.x * N;
+    float2 loc = make_float2(0.f, 0.f);
+
+    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x){
+        float v = cur_in[tid];
+        loc.x += v;
+        loc.y += v * v;
     }
-    __syncthreads();
 
-    unsigned int i = 1, j = 2;
-    while (j <= blockDim.x) {
-        if (tid % j == 0) {
-            acc_val[tid] += acc_val[tid + i];
-        }
-        i <<= 1; j <<= 1;
-        __syncthreads();
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        loc.x =  BlockAllReduce<SumOp, float, 256>(loc.x);
+        loc.y =  BlockAllReduce<SumOp, float, 256>(loc.y);
+    #else
+        BlockDoubleReduceSum(loc.x, loc.y);
+    #endif
+
+    float mean = loc.x / N;
+    float rstd = rsqrtf(loc.y / N - mean * mean + eps);
+
+    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x) {
+        float val = (cur_in[tid] - mean) * rstd;
+        if(has_affine)
+            val = val * scale[tid] + shift[tid];
+        cur_out[tid] = val;
     }
-    const float mean_val = acc_val[0] / inner;
-    __syncthreads();
-
-    acc_val[tid] = 0.f;
-    for (int i = tid; i < inner; i += blockDim.x) {
-        acc_val[tid] += (__half2float(input_ptr[i]) - mean_val) * (__half2float(input_ptr[i]) - mean_val);
-    }
-    __syncthreads();
-
-    i = 1; j = 2;
-    while (j <= blockDim.x) {
-        if (tid % j == 0) {
-            acc_val[tid] += acc_val[tid + i];
-        }
-        i <<= 1; j <<= 1;
-        __syncthreads();
-    }
-    float std = sqrtf(acc_val[0] / inner + eps);
-    float r_std = 1.0f / std;
-
-    half mean_val_h = __float2half(mean_val);
-    half r_std_h = __float2half(r_std);
-
-    if (has_affine) {
-        for (int i = tid; i < inner; i += blockDim.x) {
-            half weight_val = weight[tid]; half bias_val = bias[tid];
-            half out_val = weight_val * (input_ptr[i] - mean_val_h) * r_std_h  + bias_val;
-            // if(if_relu) out_val = (out_val > 0) ? out_val : 0;
-            output_ptr[i] =  out_val;
-        }
-    } else {
-        for (int i = tid; i < inner; i += blockDim.x) {
-            half out_val = (input_ptr[i] - mean_val_h) * r_std_h;
-            // if(if_relu) out_val = (out_val > 0) ? out_val : 0;
-            output_ptr[i] =  out_val;
-        }
-    }
-#endif
 }
 
 
@@ -305,52 +265,113 @@ ppl::common::RetCode PPLCUDALayerNormForwardImp(
     int outer,
     int inner,
     bool elementwise_affine,
-    float epsilon,
+    float eps,
     float in_scale,
     float out_scale){
 
-    int block_size = 256;
-    int grid_size = outer;
-
+    const int64_t norm_size = inner;
+    const int32_t grid_size = outer;
     if (input_shape->GetDataType() == ppl::common::DATATYPE_FLOAT32) {
-        ppl3_cukernel_layernorm_fp32_opt<<<grid_size, block_size, 0, stream>>>(
-                    (const float*)input,(const float*)scale, (const float*)shift,
-                    (float*)output, outer, inner, elementwise_affine, epsilon);
-    } else if (input_shape->GetDataType() == ppl::common::DATATYPE_FLOAT16){
-        ppl3_cukernel_layernorm_fp16_opt<<<grid_size, block_size, 0, stream>>>(
-                    (const half*)input,(const half*)scale, (const half*)shift,
-                    (half*)output, outer, inner, elementwise_affine, epsilon);
+        constexpr int32_t VPT = 16 / sizeof(float);
+        switch (norm_size)
+        {
+            case 128:
+                LayernormForward_fp32<VPT, 128 / VPT><<<grid_size, 128 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 256:
+                LayernormForward_fp32<VPT, 256 / VPT><<<grid_size, 256 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 320:
+                LayernormForward_fp32<VPT, 320 / VPT><<<grid_size, 320 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 512:
+                LayernormForward_fp32<VPT, 512 / VPT><<<grid_size, 512 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 640:
+                LayernormForward_fp32<VPT, 640 / VPT><<<grid_size, 640 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 768:
+                LayernormForward_fp32<VPT, 768 / VPT><<<grid_size, 768 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 1024:
+                LayernormForward_fp32<VPT, 1024 / VPT><<<grid_size, 1024 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 1280:
+                LayernormForward_fp32<VPT, 1280 / VPT><<<grid_size, 1280 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 2048:
+                LayernormForward_fp32<VPT, 2048 / VPT><<<grid_size, 2048 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            case 4096:
+                LayernormForward_fp32<VPT, 4096 / VPT><<<grid_size, 4096 / VPT, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, eps, norm_size, (float*)output);
+                break;
+            default :
+                LayernormForwardDefault_fp32<<<grid_size, 256, 0, stream>>>
+                ((float*)input, (float*)scale, (float*)shift, (float*)output, norm_size, true, eps);
+        }
+    } else if (input_shape->GetDataType() == ppl::common::DATATYPE_FLOAT16) {
+        constexpr int32_t VPT = 16 / sizeof(half);
+        switch (norm_size)
+        {
+            case 128:
+                LayernormForward_fp16<VPT, 128 / VPT><<<grid_size, 128 / VPT, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                break;
+            case 256:
+                LayernormForward_fp16<VPT, 256 / VPT><<<grid_size, 256 / VPT, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                break;
+            // case 320:
+                // LayernormForward_fp16<VPT, 320 / VPT><<<grid_size, 320 / VPT, 0, stream>>>
+                // ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                // break;
+            case 512:
+                LayernormForward_fp16<VPT, 512 / VPT><<<grid_size, 512 / VPT, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                break;
+            // case 640:
+                // LayernormForward_fp16<VPT, 640 / VPT><<<grid_size, 640 / VPT, 0, stream>>>
+                // ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                // break;
+            case 768:
+                LayernormForward_fp16<VPT, 768 / VPT><<<grid_size, 768 / VPT, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                break;
+            case 1024:
+                LayernormForward_fp16<VPT, 1024 / VPT><<<grid_size, 1024 / VPT, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                break;
+            // case 1280:
+                // LayernormForward_fp16<VPT, 1280 / VPT><<<grid_size, 1280 / VPT, 0, stream>>>
+                // ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                // break;
+            case 2048:
+                LayernormForward_fp16<VPT, 2048 / VPT><<<grid_size, 2048 / VPT, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                break;
+            case 4096:
+                LayernormForward_fp16<VPT, 4096 / VPT><<<grid_size, 4096 / VPT, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, eps, norm_size, (half*)output);
+                break;
+            default :
+                LayernormForwardDefault_fp16<<<grid_size, 256, 0, stream>>>
+                ((half*)input, (half*)scale, (half*)shift, (half*)output, norm_size, true, eps);
+        }
     } else if (input_shape->GetDataType() == ppl::common::DATATYPE_INT8) {
-        ppl_cudakernel_layernorm_int8<<<grid_size, block_size, 0, stream>>>(
+        ppl_cudakernel_layernorm_int8<<<grid_size, 256, 0, stream>>>(
                     (const char*)input, (const float*)scale, (const float*)shift,
-                    (char*)output, outer, inner, elementwise_affine, epsilon, in_scale, out_scale);
+                    (char*)output, outer, inner, elementwise_affine, eps, in_scale, out_scale);
     } else {
-        return ppl::common::RC_UNSUPPORTED;
-    }
-
-    return ppl::common::RC_SUCCESS;
-}
-ppl::common::RetCode PPLCUDALayerNormForwardImp256(
-    cudaStream_t stream,
-    ppl::common::TensorShape* input_shape,
-    const void* input,
-    const void* scale,
-    const void* shift,
-    void* output,
-    int outer,
-    int inner,
-    bool elementwise_affine,
-    float epsilon,
-    float in_scale,
-    float out_scale){
-
-    int block_size = 64;
-    int grid_size = outer;
-    if (input_shape->GetDataType() == ppl::common::DATATYPE_FLOAT32)
-            ppl3_cukernel_layernorm_fp32_float4<<<grid_size, block_size, 0, stream>>>(
-                    (const float*)input,(const float*)scale, (const float*)shift,
-                    (float*)output, outer, inner, elementwise_affine, epsilon);
-    else {
         return ppl::common::RC_UNSUPPORTED;
     }
     return ppl::common::RC_SUCCESS;

@@ -18,6 +18,39 @@
 #include "cudakernel/nn/resize.h"
 #include "ppl/common/types.h"
 
+
+static void GetNumBlocks(int32_t& block_size, dim3& grid_size, int32_t& channels_per_piece,
+    const int32_t num_threads, const int32_t channels) {
+    int dev = 0;
+    cudaGetDevice(&dev);
+    int sm_count = 0;
+    cudaDeviceGetAttribute(&sm_count, cudaDevAttrMultiProcessorCount, dev);
+
+    // guarantee enough blocks
+    block_size = 32;
+    while ((num_threads / block_size) >= 4 && block_size < 256) {
+        block_size = block_size << 1;
+    }
+    grid_size.x = (num_threads + block_size - 1) / block_size;
+    channels_per_piece = 8;
+    if (channels <= channels_per_piece) {
+        channels_per_piece = channels;
+        grid_size.y = 1;
+        return;
+    }
+    int32_t expected_blocks = sm_count * 4;
+    grid_size.y = (channels + channels_per_piece - 1) / channels_per_piece;
+    while (channels_per_piece < channels &&
+        grid_size.x * grid_size.y > expected_blocks) {
+        channels_per_piece = channels_per_piece << 1;
+        grid_size.y = (channels + channels_per_piece - 1) / channels_per_piece;
+    }
+    if (channels_per_piece > channels) {
+        channels_per_piece = channels;
+        grid_size.y = (channels + channels_per_piece - 1) / channels_per_piece;
+    }
+}
+
 struct half8_ {
     half x0;
     half y0;
@@ -257,6 +290,7 @@ __global__ void ppl_cukernel_resize_bilinear_int8(
     float h_scale,
     float w_scale,
     int channels,
+    int channels_per_piece,
     const T* input,
     int in_height,
     int in_width,
@@ -271,19 +305,6 @@ __global__ void ppl_cukernel_resize_bilinear_int8(
     if (index < num_threads) {
         const int w2 = index % out_width; // 0:out_width-1
         const int h2 = index / out_width; // 0:out_height-1
-        // special case: just copy
-        if (in_height == out_height && in_width == out_width) {
-            const int h1  = h2;
-            const int w1  = w2;
-            const T* pos1 = &input[h1 * in_width + w1];
-            T* pos2       = &output[h2 * out_width + w2];
-            for (int c = 0; c < channels; ++c) {
-                pos2[0] = pos1[0];
-                pos1 += in_width * in_height;
-                pos2 += out_width * out_height;
-            }
-            return;
-        }
 
         //const float h1r = h_scale * h2;
         const float h1r = cudaComputeSourceIndex(h_scale, h2, transform_mode);
@@ -300,9 +321,11 @@ __global__ void ppl_cukernel_resize_bilinear_int8(
         const float w1lambda = w1r - w1;
         const float w0lambda = 1.f - w1lambda;
 
-        const T* pos1 = &input[h1 * in_width + w1];
-        T* pos2       = &output[h2 * out_width + w2];
-        for (int c = 0; c < channels; ++c) { //右边一个和下边一个
+        int start_c = blockIdx.y * channels_per_piece;
+        const T* pos1 = &input[start_c * in_height * in_width + h1 * in_width + w1];
+        T* pos2       = &output[start_c * out_height * out_width + h2 * out_width + w2];
+        for (int c = 0;
+            (start_c + c) < channels && c < channels_per_piece; ++c) { //右边一个和下边一个
             // pos2[0] = h0lambda * (w0lambda * pos1[0] +
             // w1lambda * pos1[w1p]) +
             // h1lambda * (w0lambda * pos1[h1p * in_width] +
@@ -324,6 +347,7 @@ __global__ void ppl_cukernel_resize_bilinear(
     float h_scale,
     float w_scale,
     int channels,
+    int channels_per_piece,
     const T* input,
     int in_height,
     int in_width,
@@ -336,19 +360,6 @@ __global__ void ppl_cukernel_resize_bilinear(
     if (index < num_threads) {
         const int w2 = index % out_width; // 0:out_width-1
         const int h2 = index / out_width; // 0:out_height-1
-        // special case: just copy
-        if (in_height == out_height && in_width == out_width) {
-            const int h1  = h2;
-            const int w1  = w2;
-            const T* pos1 = &input[h1 * in_width + w1];
-            T* pos2       = &output[h2 * out_width + w2];
-            for (int c = 0; c < channels; ++c) {
-                pos2[0] = pos1[0];
-                pos1 += in_width * in_height;
-                pos2 += out_width * out_height;
-            }
-            return;
-        }
 
         //const float h1r = h_scale * h2;
         const float h1r = cudaComputeSourceIndex(h_scale, h2, transform_mode);
@@ -365,9 +376,11 @@ __global__ void ppl_cukernel_resize_bilinear(
         const float w1lambda = w1r - w1;
         const float w0lambda = 1.f - w1lambda;
 
-        const T* pos1 = &input[h1 * in_width + w1];
-        T* pos2       = &output[h2 * out_width + w2];
-        for (int c = 0; c < channels; ++c) { //右边一个和下边一个
+        int start_c = blockIdx.y * channels_per_piece;
+        const T* pos1 = &input[start_c * in_height * in_width + h1 * in_width + w1];
+        T* pos2       = &output[start_c * out_height * out_width + h2 * out_width + w2];
+        for (int c = 0;
+            (start_c + c) < channels && c < channels_per_piece; ++c) { //右边一个和下边一个
             // pos2[0] = h0lambda * (w0lambda * pos1[0] +
             // w1lambda * pos1[w1p]) +
             // h1lambda * (w0lambda * pos1[h1p * in_width] +
@@ -380,11 +393,59 @@ __global__ void ppl_cukernel_resize_bilinear(
 }
 
 template <typename T>
+__global__ void ppl_cukernel_resize_bilinear_nhwc(
+    int num_threads,
+    float h_scale,
+    float w_scale,
+    int channels,
+    int channels_per_piece,
+    const T* input,
+    int in_height,
+    int in_width,
+    T* output,
+    int out_height,
+    int out_width,
+    int transform_mode)
+{
+    int index = threadIdx.x + blockIdx.x * blockDim.x;
+    int bidx = blockIdx.z;
+    if (index < num_threads) {
+        const int w2 = index % out_width; // 0:out_width-1
+        const int h2 = index / out_width; // 0:out_height-1
+
+        //const float h1r = h_scale * h2;
+        const float h1r = cudaComputeSourceIndex(h_scale, h2, transform_mode);
+
+        const int h1         = h1r;
+        const int h1p        = (h1 < in_height - 1) ? 1 : 0;
+        const float h1lambda = h1r - h1;
+        const float h0lambda = 1.f - h1lambda;
+
+        //const float w1r = w_scale * w2;
+        const float w1r      = cudaComputeSourceIndex(w_scale, w2, transform_mode);
+        const int w1         = w1r;
+        const int w1p        = (w1 < in_width - 1) ? 1 : 0;
+        const float w1lambda = w1r - w1;
+        const float w0lambda = 1.f - w1lambda;
+
+        const T* pos1 = &input[bidx * in_height * in_width * channels + (h1 * in_width + w1) * channels];
+        T* pos2       = &output[bidx * out_height * out_width * channels + (h2 * out_width + w2) * channels];
+        int start_c = blockIdx.y * channels_per_piece;
+        for (int c = start_c;
+            c < channels && (c - start_c) < channels_per_piece; ++c) { //右边一个和下边一个
+            pos2[c] = bilinear_interplote<T>(w0lambda, w1lambda, h0lambda, h1lambda,
+                pos1[c], pos1[w1p * channels + c], pos1[(h1p * in_width) * channels + c], pos1[(h1p * in_width + w1p) * channels + c]);
+        }
+    }
+}
+
+template <typename T>
 __global__ void ppl_cukernel_resize_nearest_int8(
     int num_threads,
     float h_scale,
     float w_scale,
     int channels,
+    int channels_per_piece,
     const T* input,
     int in_height,
     int in_width,
@@ -399,19 +460,6 @@ __global__ void ppl_cukernel_resize_nearest_int8(
     if (index < num_threads) {
         const int w2 = index % out_width; // 0:out_width-1
         const int h2 = index / out_width; // 0:out_height-1
-        // special case: just copy
-        if (in_height == out_height && in_width == out_width) {
-            const int h1  = h2;
-            const int w1  = w2;
-            const T* pos1 = &input[h1 * in_width + w1];
-            T* pos2       = &output[h2 * out_width + w2];
-            for (int c = 0; c < channels; ++c) {
-                pos2[0] = pos1[0];
-                pos1 += in_width * in_height;
-                pos2 += out_width * out_height;
-            }
-            return;
-        }
 
         //const float h1r = h_scale * h2;
         const float h1r = cudaComputeSourceIndex(h_scale, h2, transform_mode);
@@ -421,9 +469,11 @@ __global__ void ppl_cukernel_resize_nearest_int8(
         const float w1r = cudaComputeSourceIndex(w_scale, w2, transform_mode);
         const int w1    = w1r;
 
-        const T* pos1 = &input[h1 * in_width + w1];
-        T* pos2       = &output[h2 * out_width + w2];
-        for (int c = 0; c < channels; ++c) {
+        int start_c = blockIdx.y * channels_per_piece;
+        const T* pos1 = &input[start_c * in_height * in_width + h1 * in_width + w1];
+        T* pos2       = &output[start_c * out_height * out_width + h2 * out_width + w2];
+        for (int c = 0;
+            (start_c + c) < channels && c < channels_per_piece; ++c) {
             int32_t temp = round(pos1[0] * in_scale / out_scale);
             if(temp > 127) temp = 127;
             if(temp < -128) temp = -128;
@@ -440,6 +490,7 @@ __global__ void ppl_cukernel_resize_nearest(
     float h_scale,
     float w_scale,
     int channels,
+    int channels_per_piece,
     const T* input,
     int in_height,
     int in_width,
@@ -452,19 +503,6 @@ __global__ void ppl_cukernel_resize_nearest(
     if (index < num_threads) {
         const int w2 = index % out_width; // 0:out_width-1
         const int h2 = index / out_width; // 0:out_height-1
-        // special case: just copy
-        if (in_height == out_height && in_width == out_width) {
-            const int h1  = h2;
-            const int w1  = w2;
-            const T* pos1 = &input[h1 * in_width + w1];
-            T* pos2       = &output[h2 * out_width + w2];
-            for (int c = 0; c < channels; ++c) {
-                pos2[0] = pos1[0];
-                pos1 += in_width * in_height;
-                pos2 += out_width * out_height;
-            }
-            return;
-        }
 
         //const float h1r = h_scale * h2;
         const float h1r = cudaComputeSourceIndex(h_scale, h2, transform_mode);
@@ -474,12 +512,53 @@ __global__ void ppl_cukernel_resize_nearest(
         const float w1r = cudaComputeSourceIndex(w_scale, w2, transform_mode);
         const int w1    = w1r;
 
-        const T* pos1 = &input[h1 * in_width + w1];
-        T* pos2       = &output[h2 * out_width + w2];
-        for (int c = 0; c < channels; ++c) {
+        int start_c = blockIdx.y * channels_per_piece;
+        const T* pos1 = &input[start_c * in_height * in_width + h1 * in_width + w1];
+        T* pos2       = &output[start_c * out_height * out_width + h2 * out_width + w2];
+        for (int c = 0;
+            (start_c + c) < channels && c < channels_per_piece; ++c) {
             pos2[0] = pos1[0];
             pos1 += in_width * in_height;
             pos2 += out_width * out_height;
+        }
+    }
+}
+
+template <typename T>
+__global__ void ppl_cukernel_resize_nearest_nhwc(
+    int num_threads,
+    float h_scale,
+    float w_scale,
+    int channels,
+    int channels_per_piece,
+    const T* input,
+    int in_height,
+    int in_width,
+    T* output,
+    int out_height,
+    int out_width,
+    int transform_mode)
+{
+    int index = threadIdx.x + blockIdx.x * blockDim.x;
+    int bidx = blockIdx.z;
+    if (index < num_threads) {
+        const int w2 = index % out_width; // 0:out_width-1
+        const int h2 = index / out_width; // 0:out_height-1
+
+        //const float h1r = h_scale * h2;
+        const float h1r = cudaComputeSourceIndex(h_scale, h2, transform_mode);
+        const int h1    = h1r;
+
+        //const float w1r = w_scale * w2;
+        const float w1r = cudaComputeSourceIndex(w_scale, w2, transform_mode);
+        const int w1    = w1r;
+
+        const T* pos1 = &input[bidx * in_height * in_width * channels + (h1 * in_width + w1) * channels];
+        T* pos2       = &output[bidx * out_height * out_width * channels + (h2 * out_width + w2) * channels];
+        int start_c = blockIdx.y * channels_per_piece;
+        for (int c = 0;
+            (start_c + c) < channels && c < channels_per_piece; ++c) {
+            pos2[start_c + c] = pos1[start_c + c];
         }
     }
 }
@@ -490,6 +569,7 @@ __global__ void ppl_cukernel_resize_cubic_int8(
     float h_scale,
     float w_scale,
     int channels,
+    int channels_per_piece,
     const T* input,
     int in_height,
     int in_width,
@@ -505,19 +585,6 @@ __global__ void ppl_cukernel_resize_cubic_int8(
     if (index < num_threads) {
         const int w2 = index % out_width; // 0:out_width-1
         const int h2 = index / out_width; // 0:out_height-1
-        // special case: just copy
-        if (in_height == out_height && in_width == out_width) {
-            const int h1  = h2;
-            const int w1  = w2;
-            const T* pos1 = &input[h1 * in_width + w1];
-            T* pos2       = &output[h2 * out_width + w2];
-            for (int c = 0; c < channels; ++c) {
-                pos2[0] = pos1[0];
-                pos1 += in_width * in_height;
-                pos2 += out_width * out_height;
-            }
-            return;
-        }
 
         const float h1r      = cudaComputeSourceIndex(h_scale, h2, transform_mode);
         const int h1         = floorf(h1r);
@@ -527,8 +594,10 @@ __global__ void ppl_cukernel_resize_cubic_int8(
         const int w1         = floorf(w1r);
         const float w1lambda = w1r - w1;
 
-        T* pos2 = &output[h2 * out_width + w2];
-        for (int c = 0; c < channels; ++c) {
+        int start_c = blockIdx.y * channels_per_piece;
+        T* pos2 = &output[start_c * out_height * out_width +h2 * out_width + w2];
+        for (int c = start_c;
+            start_c < channels && (c - start_c) < channels_per_piece; ++c) {
             float coefficients[4];
 
             for (int k = 0; k < 4; k++) {
@@ -567,6 +636,7 @@ __global__ void ppl_cukernel_resize_cubic(
     float h_scale,
     float w_scale,
     int channels,
+    int channels_per_piece,
     const T* input,
     int in_height,
     int in_width,
@@ -580,19 +650,6 @@ __global__ void ppl_cukernel_resize_cubic(
     if (index < num_threads) {
         const int w2 = index % out_width; // 0:out_width-1
         const int h2 = index / out_width; // 0:out_height-1
-        // special case: just copy
-        if (in_height == out_height && in_width == out_width) {
-            const int h1  = h2;
-            const int w1  = w2;
-            const T* pos1 = &input[h1 * in_width + w1];
-            T* pos2       = &output[h2 * out_width + w2];
-            for (int c = 0; c < channels; ++c) {
-                pos2[0] = pos1[0];
-                pos1 += in_width * in_height;
-                pos2 += out_width * out_height;
-            }
-            return;
-        }
 
         const float h1r      = cudaComputeSourceIndex(h_scale, h2, transform_mode);
         const int h1         = floorf(h1r);
@@ -602,8 +659,10 @@ __global__ void ppl_cukernel_resize_cubic(
         const int w1         = floorf(w1r);
         const float w1lambda = w1r - w1;
 
-        T* pos2 = &output[h2 * out_width + w2];
-        for (int c = 0; c < channels; ++c) {
+        int start_c = blockIdx.y * channels_per_piece;
+        T* pos2 = &output[start_c * out_height * out_width +h2 * out_width + w2];
+        for (int c = start_c;
+            c < channels && (c - start_c) < channels_per_piece; ++c) {
             T coefficients[4];
 
             for (int k = 0; k < 4; k++) {
@@ -685,17 +744,69 @@ ppl::common::RetCode ppl_resize_forward(
         w_scale = hostComputeAreaScale(in_width, out_width, transform_mode);
     }
     int num_threads = out_height * out_width;
-    int block_size  = 256;
-    int grid        = (num_threads + block_size - 1) / block_size;
+    int block_size  = 256; dim3 grid_size(1, 1, 1); int channels_per_piece = 1;
+    GetNumBlocks(block_size, grid_size, channels_per_piece, num_threads, channels);
     if (inter_mode == 0) {
-        ppl_cukernel_resize_nearest<T><<<grid, block_size, 0, stream>>>(
-            num_threads, h_scale, w_scale, channels, input, in_height, in_width, output, out_height, out_width, transform_mode);
+        ppl_cukernel_resize_nearest<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, transform_mode);
     } else if (inter_mode == 1) {
-        ppl_cukernel_resize_bilinear<T><<<grid, block_size, 0, stream>>>(
-            num_threads, h_scale, w_scale, channels, input, in_height, in_width, output, out_height, out_width, transform_mode);
+        ppl_cukernel_resize_bilinear<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, transform_mode);
     } else if (inter_mode == 2) {
-        ppl_cukernel_resize_cubic<T><<<grid, block_size, 0, stream>>>(
-            num_threads, h_scale, w_scale, channels, input, in_height, in_width, output, out_height, out_width, cubic_coeff, transform_mode);
+        ppl_cukernel_resize_cubic<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, cubic_coeff, transform_mode);
+    }
+    return ppl::common::RC_SUCCESS;
+}
+
+template <typename T>
+ppl::common::RetCode ppl_resize_forward_nhwc(
+    cudaStream_t stream,
+    const ppl::common::TensorShape* input_shape,
+    const T* input,
+    const ppl::common::TensorShape* output_shape,
+    T* output,
+    bool scale_pre_set,
+    float h_scale_pre,
+    float w_scale_pre,
+    int transform_mode,
+    int inter_mode,
+    float cubic_coeff)
+{
+    if (transform_mode == 5) return ppl::common::RC_UNSUPPORTED;
+    int dim_count  = output_shape->GetDimCount();
+    int out_height = output_shape->GetDim(2), out_width = 1;
+    int in_height = input_shape->GetDim(2), in_width = 1;
+    for (int it = 3; it < dim_count - 1; ++it) {
+        out_height *= output_shape->GetDim(it);
+        in_height *= input_shape->GetDim(it);
+    }
+    if (dim_count >= 4) {
+        out_width    = output_shape->GetDim(dim_count - 1);
+        in_width     = input_shape->GetDim(dim_count - 1);
+    }
+    int channels = output_shape->GetDim(1);
+
+    float h_scale = 0.f, w_scale = 0.f;
+    if (scale_pre_set) {
+        h_scale = h_scale_pre;
+        w_scale = w_scale_pre;
+    } else {
+        h_scale = hostComputeAreaScale(in_height, out_height, transform_mode);
+        w_scale = hostComputeAreaScale(in_width, out_width, transform_mode);
+    }
+    int num_threads = out_height * out_width;
+    int block_size  = 256; dim3 grid_size(1, 1, 1); int channels_per_piece = 1;
+    GetNumBlocks(block_size, grid_size, channels_per_piece, num_threads, channels);
+    grid_size.z =  output_shape->GetDim(0);
+    if (inter_mode == 0) {
+        ppl_cukernel_resize_nearest_nhwc<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, transform_mode);
+    } else if (inter_mode == 1) {
+        ppl_cukernel_resize_bilinear_nhwc<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, transform_mode);
+    } else if (inter_mode == 2) {
+        return ppl::common::RC_UNSUPPORTED;
     }
     return ppl::common::RC_SUCCESS;
 }
@@ -737,17 +848,17 @@ ppl::common::RetCode ppl_resize_forward_int8(
         w_scale = hostComputeAreaScale(in_width, out_width, transform_mode);
     }
     int num_threads = out_height * out_width;
-    int block_size  = 256;
-    int grid        = (num_threads + block_size - 1) / block_size;
+    int block_size  = 256; dim3 grid_size(1, 1, 1); int channels_per_piece = 1;
+    GetNumBlocks(block_size, grid_size, channels_per_piece, num_threads, channels);
     if (inter_mode == 0) {
-        ppl_cukernel_resize_nearest_int8<T><<<grid, block_size, 0, stream>>>(
-            num_threads, h_scale, w_scale, channels, input, in_height, in_width, output, out_height, out_width, in_scale, out_scale, transform_mode);
+        ppl_cukernel_resize_nearest_int8<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, in_scale, out_scale, transform_mode);
     } else if (inter_mode == 1) {
-        ppl_cukernel_resize_bilinear_int8<T><<<grid, block_size, 0, stream>>>(
-            num_threads, h_scale, w_scale, channels, input, in_height, in_width, output, out_height, out_width, in_scale, out_scale, transform_mode);
+        ppl_cukernel_resize_bilinear_int8<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, in_scale, out_scale, transform_mode);
     } else if (inter_mode == 2) {
-        ppl_cukernel_resize_cubic_int8<T><<<grid, block_size, 0, stream>>>(
-            num_threads, h_scale, w_scale, channels, input, in_height, in_width, output, out_height, out_width, cubic_coeff, in_scale, out_scale, transform_mode);
+        ppl_cukernel_resize_cubic_int8<T><<<grid_size, block_size, 0, stream>>>(
+            num_threads, h_scale, w_scale, channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, cubic_coeff, in_scale, out_scale, transform_mode);
     }
     return ppl::common::RC_SUCCESS;
 }
@@ -768,10 +879,27 @@ ppl::common::RetCode PPLCUDAResizeForwardImp(
     float in_scale,
     float out_scale)
 {
-    // if (inter_mode == 0 && nearest_mode != 0 ) return ppl::common::RC_UNSUPPORTED; // nearest supports round only 
+    // special case, just copy
+    int dim_count  = output_shape->GetDimCount();
+    int out_height = output_shape->GetDim(2), out_width = 1;
+    int in_height = input_shape->GetDim(2), in_width = 1;
+    for (int it = 3; it < dim_count - 1; ++it) {
+        out_height *= output_shape->GetDim(it);
+        in_height *= input_shape->GetDim(it);
+    }
+    if (dim_count >= 4) {
+        out_width    = output_shape->GetDim(dim_count - 1);
+        in_width     = input_shape->GetDim(dim_count - 1);
+    }
+    if (out_height == in_height && out_width == in_width) {
+        cudaMemcpyAsync(output, input, input_shape->CalcBytesIncludingPadding(), cudaMemcpyDeviceToDevice, stream);
+    }
+    // common case
     if (output_shape->GetDataType() == ppl::common::DATATYPE_FLOAT16) {
         if (output_shape->GetDataFormat() == ppl::common::DATAFORMAT_NDARRAY) {
             return ppl_resize_forward<half>(stream, input_shape, (const half*)input, output_shape, (half*)output, scale_pre_set, h_scale, w_scale, transform_mode, inter_mode, cubic_coeff);
+        } else if (output_shape->GetDataFormat() == ppl::common::DATAFORMAT_NHWC8) {
+            return ppl_resize_forward_nhwc<half>(stream, input_shape, (const half*)input, output_shape, (half*)output, scale_pre_set, h_scale, w_scale, transform_mode, inter_mode, cubic_coeff);
         } else {
             return ppl::common::RC_UNSUPPORTED;
         }

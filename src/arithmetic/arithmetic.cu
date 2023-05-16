@@ -737,6 +737,28 @@ __global__ void ppl_cukernel_arithmetic_nobroadcast(
 }
 
 template<ArithmeticOpType op_type, typename T>
+__global__ void ppl_cukernel_arithmetic_nobroadcast_float4(
+    const uint64_t num_elems,
+    const T *input0,
+    const T* input1,
+    T *output) {
+    uint64_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= num_elems) return;
+    T val_a = input0[index];
+    T val_b = input1[index];
+    T val_out;
+    const half* val_a_ptr = reinterpret_cast<const half*>(&val_a);
+    const half* val_b_ptr = reinterpret_cast<const half*>(&val_b);
+    half* val_out_ptr = reinterpret_cast<half*>(&val_out);
+    constexpr int VEC_SIZE = 8;
+    #pragma unroll
+    for (int i = 0; i < VEC_SIZE; ++i) {
+        val_out_ptr[i] = ppl_arithmetic_scalar<op_type, half>(val_a_ptr[i], val_b_ptr[i]);
+    }
+    output[index] = val_out;
+}
+
+template<ArithmeticOpType op_type, typename T>
 __global__ void ppl_cukernel_arithmetic_nobroadcast_int8(
     const uint64_t num_elems,
     const T *input0,
@@ -909,6 +931,12 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImp(
                 stream>>>(num_elems, inner_dim, channel_dim, first_shorter, (const T*)input0, (const T*)input1, (T*)output);
         }
     } else if (num_broadcast_dims == 0) {
+        if ((std::is_same<T, half>::value) && num_elems % 8 == 0) {
+            grid_size = ((num_elems >> 3) + block_size - 1) / block_size;
+            ppl_cukernel_arithmetic_nobroadcast_float4<op_type, float4><<<grid_size, block_size, 0,
+                stream>>>(num_elems >> 3, (const float4*)input0, (const float4*)input1, (float4*)output);
+            return ppl::common::RC_SUCCESS;
+        }
         ppl_cukernel_arithmetic_nobroadcast<op_type, T><<<grid_size, block_size, 0,
             stream>>>(num_elems, (const T*)input0, (const T*)input1, (T*)output);
     } else {
