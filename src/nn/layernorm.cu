@@ -65,7 +65,11 @@ __global__ void LayernormForward_fp16(
     copy<sizeof(half) * VPT>(&weight[threadIdx.x * VPT], weightLocal);
     __shared__ half mu;     // mean
     __shared__ half rsigma; // 1 / std.dev.
-    const half2 reduced = BlockAllReduce<SumOp, half2, TPB>(loc);
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        const half2 reduced = BlockAllReduce<SumOp, half2, TPB>(loc);
+    #else
+        const half2 reduced = blockReduceSum<half2>(loc);
+    #endif
 
     if (threadIdx.x == 0)
     {
@@ -110,8 +114,13 @@ __global__ void LayernormForward_fp32(
     copy<sizeof(float) * VPT>(&weight[threadIdx.x * VPT], weightLocal);
     __shared__ float mu;     // mean
     __shared__ float rsigma; // 1 / std.dev.
-    const float reduced_x = BlockAllReduce<SumOp, float, TPB>(loc.x);
-    const float reduced_y = BlockAllReduce<SumOp, float, TPB>(loc.y);
+    #if (__CUDACC_VER_MAJOR__ >= 11)
+        const float reduced_x = BlockAllReduce<SumOp, float, TPB>(loc.x);
+        const float reduced_y = BlockAllReduce<SumOp, float, TPB>(loc.y);
+    #else
+        const float reduced_x = blockReduceSum<float>(loc.x);
+        const float reduced_y = blockReduceSum<float>(loc.y);
+    #endif
     if (threadIdx.x == 0)
     {
         mu = reduced_x;
