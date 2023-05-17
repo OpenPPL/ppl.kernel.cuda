@@ -233,6 +233,22 @@ __forceinline__ __device__ T blockReduceSum(T val) {
     return val;
 }
 
+template <>
+__forceinline__ __device__ half2 blockReduceSum(half2 val) {
+    __shared__ half2 shared[32];
+    int lane = threadIdx.x & 0x1f;
+    int wid = threadIdx.x >> 5;
+
+    val = WarpReduceSum(val);
+    if(lane == 0) shared[wid] = val;
+    __syncthreads();
+
+    val = (lane < (blockDim.x >> 5)) ? shared[lane] : half2(0.f, 0.f);
+    __syncthreads();
+    val = WarpReduceSum(val);
+    return val;
+}
+
 template<typename T>
 __device__ __forceinline__ void BlockDoubleReduceSum(T& val0, T& val1) {
     __shared__ T shared0[32];
