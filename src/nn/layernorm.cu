@@ -68,7 +68,9 @@ __global__ void LayernormForward_fp16(
     #if (__CUDACC_VER_MAJOR__ >= 11)
         const half2 reduced = BlockAllReduce<SumOp, half2, TPB>(loc);
     #else
-        const half2 reduced = blockReduceSum<half2>(loc);
+        half2 reduced;
+        reduced.x = blockReduceSum<half>(loc.x);
+        reduced.y = blockReduceSum<half>(loc.y);
     #endif
 
     if (threadIdx.x == 0)
