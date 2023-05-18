@@ -47,6 +47,7 @@ __global__ void LayernormForward_fp16(
     const int32_t normalize_shape,
     half *output
 ){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
     const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
     half inLocal[VPT]; half weightLocal[VPT]; half biasLocal[VPT];
 
@@ -87,6 +88,7 @@ __global__ void LayernormForward_fp16(
         outLocal[it] = (inLocal[it] - mu) * rsigma * weightLocal[it] + biasLocal[it];
     }
     copy<sizeof(half) * VPT>(outLocal, &output[idx]);
+#endif
 };
 
 template <int VPT, int TPB>
@@ -144,6 +146,7 @@ __global__ void LayernormForward_fp32(
 __global__ __launch_bounds__(256) void LayernormForwardDefault_fp16(
     const half* input, const half* scale, const half* shift, half* output,
     int N, bool has_affine, float eps) {
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
     auto cur_in = input + blockIdx.x * N;
     auto cur_out = output + blockIdx.x * N;
     float2 loc = make_float2(0.f, 0.f);
@@ -172,6 +175,7 @@ __global__ __launch_bounds__(256) void LayernormForwardDefault_fp16(
             val = val * scale[tid] + shift[tid];
         cur_out[tid] = val;
     }
+#endif
 }
 
 
