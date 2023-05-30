@@ -21,7 +21,7 @@
 #include "conv_fp16.h"
 
 void PPLCUDAConvolutionCvtFlt(
-    cudaStream_t& stream,
+    const cudaStream_t stream,
     void* output,
     const void* input,
     ppl::common::datatype_t type,
