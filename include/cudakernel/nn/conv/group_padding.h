@@ -28,7 +28,7 @@ void PPLCUDAConvolutionCvtFlt(
     conv_param_t& conv_param);
 
 void PPLCUDAConvolutionCvtBias(
-    cudaStream_t& stream,
+    const cudaStream_t stream,
     void* output,
     const void* input,
     ppl::common::datatype_t type,
