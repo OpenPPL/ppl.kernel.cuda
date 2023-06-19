@@ -876,8 +876,9 @@ void PPLCUDADataConvert(
     void* tempBuf,
     ReFormatParam& param)
 {
-    bool nhwc_ndarray = (GetCVTFormatMode(param) == NDARRAY_NHWC || GetCVTFormatMode(param) == NHWC_NDARRAY);
-    bool only_nc = param.n_inner == 1 && nhwc_ndarray;
+    bool ndarray_nhwc = GetCVTFormatMode(param) == NDARRAY_NHWC;
+    bool nhwc_ndarray = GetCVTFormatMode(param) == NHWC_NDARRAY;
+    bool only_nc = param.n_inner == 1 && (ndarray_nhwc || nhwc_ndarray);
     bool if_padded = param.dst_pad != param.src_pad;
 
     if (param.in_format != param.out_format && (param.in_type != param.out_type || !param.same_scale)) { // mix-type and mix-format
@@ -894,17 +895,19 @@ void PPLCUDADataConvert(
     } else if (param.in_format != param.out_format && (param.in_type == param.out_type && param.same_scale)) { // only mix-format
         if (only_nc) { // ndarray<->nhwc, in-shape is N*C, out-shape is N*C_pad
             PPLCUDACVTFormatNC(stream, input, output, param);
-        } else if (!if_padded && nhwc_ndarray) { // not padded, use fast transpose
+        } else if (!if_padded && (ndarray_nhwc || nhwc_ndarray)) { // not padded, use fast transpose
             TransposeKernelParam param_;
             param_.perm = {0, 2, 1};
             ppl::common::TensorShape src_shape;
             src_shape.SetDataFormat(ppl::common::DATAFORMAT_NDARRAY);
             src_shape.SetDataType(param.in_type);
-            std::vector<int64_t> dims{param.n_outer, param.channel, param.n_inner};
+            int ndarray_channel = nhwc_ndarray ? param.n_inner : param.channel;
+            int ndarray_inner = nhwc_ndarray ? param.channel : param.n_inner;
+            std::vector<int64_t> dims{param.n_outer, ndarray_channel, ndarray_inner};
             src_shape.Reshape(dims);
             ppl::common::TensorShape dst_shape(src_shape);
-            dst_shape.SetDim(1, param.n_inner);
-            dst_shape.SetDim(2, param.channel);
+            dst_shape.SetDim(1, ndarray_inner);
+            dst_shape.SetDim(2, ndarray_channel);
             PPLCUDATransposeForwardImp(stream, param_, &src_shape, input, &dst_shape, output);
         } else {
             PPLCUDACVTFormat(stream, input, output, param);
