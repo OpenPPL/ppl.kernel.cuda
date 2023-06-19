@@ -340,7 +340,7 @@ __global__ void ppl_cukernel_resize_bilinear_int8(
         const T* pos1 = &input[start_c * in_height * in_width + h1 * in_width + w1];
         T* pos2       = &output[start_c * out_height * out_width + h2 * out_width + w2];
         for (int c = 0;
-            (start_c + c) < channels && c < channels_per_piece; ++c) { //右边一个和下边一个
+            (start_c + c) < channels && c < channels_per_piece; ++c) {
             // pos2[0] = h0lambda * (w0lambda * pos1[0] +
             // w1lambda * pos1[w1p]) +
             // h1lambda * (w0lambda * pos1[h1p * in_width] +
@@ -395,7 +395,7 @@ __global__ void ppl_cukernel_resize_bilinear(
         const T* pos1 = &input[start_c * in_height * in_width + h1 * in_width + w1];
         T* pos2       = &output[start_c * out_height * out_width + h2 * out_width + w2];
         for (int c = 0;
-            (start_c + c) < channels && c < channels_per_piece; ++c) { //右边一个和下边一个
+            (start_c + c) < channels && c < channels_per_piece; ++c) {
             // pos2[0] = h0lambda * (w0lambda * pos1[0] +
             // w1lambda * pos1[w1p]) +
             // h1lambda * (w0lambda * pos1[h1p * in_width] +
@@ -448,7 +448,7 @@ __global__ void ppl_cukernel_resize_bilinear_nhwc(
         T* pos2       = &output[bidx * out_height * out_width * pad_channels + (h2 * out_width + w2) * pad_channels];
         int start_c = blockIdx.y * channels_per_piece;
         for (int c = start_c;
-            c < channels && (c - start_c) < channels_per_piece; ++c) { //右边一个和下边一个
+            c < channels && (c - start_c) < channels_per_piece; ++c) {
             pos2[c] = bilinear_interplote<T>(w0lambda, w1lambda, h0lambda, h1lambda,
                 pos1[c], pos1[w1p * pad_channels + c], pos1[(h1p * in_width) * pad_channels + c], pos1[(h1p * in_width + w1p) * pad_channels + c]);
         }
