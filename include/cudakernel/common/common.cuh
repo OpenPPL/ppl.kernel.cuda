@@ -219,6 +219,26 @@ __device__ __forceinline__ T WarpReduceLogAddSum(T val) {
 
 template <typename T>
 __forceinline__ __device__ T blockReduceSum(T val) {
+  static __shared__ T shared[32];
+  int lane = threadIdx.x & 0x1f;
+  int wid = threadIdx.x >> 5;
+
+  val = WarpReduceSum<T>(val);
+
+  if (lane == 0) shared[wid] = val;
+  __syncthreads();
+
+  if (wid == 0) {
+      val = (threadIdx.x < ((blockDim.x + 31) >> 5)) ? shared[lane] : (T)0.0f;
+      val = WarpReduceSum<T>(val);
+      return val;
+  }
+  return (T)0.0f;
+}
+
+
+template<typename T>
+__device__ __forceinline__ T BlockReduceSum(T val) {
     __shared__ T shared[32];
     int lane = threadIdx.x & 0x1f;
     int wid = threadIdx.x >> 5;
@@ -227,8 +247,7 @@ __forceinline__ __device__ T blockReduceSum(T val) {
     if(lane == 0) shared[wid] = val;
     __syncthreads();
 
-    val = (lane < (blockDim.x >> 5)) ? shared[lane] : (T)0.0f;
-    __syncthreads();
+    val = (lane < ((blockDim.x + 31) >> 5)) ? shared[lane] : (T)0.0f;
     val = WarpReduceSum(val);
     return val;
 }
@@ -266,28 +285,13 @@ __forceinline__ __device__ T blockReduceMax(T val) {
   if (lane == 0) shared[wid] = val;
   __syncthreads();
 
-  val = (threadIdx.x < (blockDim.x >> 5)) ? shared[lane] : (T)-99999;
+  val = (threadIdx.x < ((blockDim.x + 31) >> 5)) ? shared[lane] : (T)-99999;
   __syncthreads();
   val = WarpReduceMax(val);
   return val;
 }
 
 
-template<typename T>
-__device__ __forceinline__ T BlockReduceSum(T val) {
-    __shared__ T shared[32];
-    int lane = threadIdx.x & 0x1f;
-    int wid = threadIdx.x >> 5;
-
-    val = WarpReduceSum(val);
-    if(lane == 0) shared[wid] = val;
-    __syncthreads();
-
-    val = (lane < (blockDim.x >> 5)) ? shared[lane] : (T)0.0f;
-    __syncthreads();
-    val = WarpReduceSum(val);
-    return val;
-}
 
 inline int GetBlockSize(const int n, const int max_size = 1024) {
     int ret = 32;
@@ -295,4 +299,39 @@ inline int GetBlockSize(const int n, const int max_size = 1024) {
         ret <<= 1;
     }
     return ret;
+}
+
+
+template <int VPT>
+struct BytesToType;
+
+template <>
+struct BytesToType<2>
+{
+    using type = uint16_t;
+};
+template <>
+struct BytesToType<4>
+{
+    using type = uint32_t;
+};
+template <>
+struct BytesToType<8>
+{
+    using type = uint64_t;
+};
+template <>
+struct BytesToType<16>
+{
+    using type = float4;
+};
+
+template <int Bytes>
+__device__ inline void copy(const void* local, void* data)
+{
+    using T = typename BytesToType<Bytes>::type;
+
+    const T* in = static_cast<const T*>(local);
+    T* out = static_cast<T*>(data);
+    *out = *in;
 }

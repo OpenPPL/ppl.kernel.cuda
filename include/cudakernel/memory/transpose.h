@@ -33,4 +33,13 @@ ppl::common::RetCode PPLCUDATransposeForwardImp(
     const ppl::common::TensorShape* output_shape,
     void* output);
 
+ppl::common::RetCode PPLCUDATranspose01ForwardImp(
+    cudaStream_t stream,
+    const void *input,
+    ppl::common::datatype_t datatype,
+    const int64_t dim0,
+    const int64_t dim1,
+    const int64_t dim2,
+    void *output);
+
 #endif // PPLCUDA_KERNEL_INCLUDE_TRANSPOSE_TRANSPOSE_H_

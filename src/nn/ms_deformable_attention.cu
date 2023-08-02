@@ -111,7 +111,7 @@ __global__ void ms_deformable_im2col_gpu_kernel(const int n,
     const int sampling_index = _temp; 
     const int m_col = _temp % num_heads;
     _temp /= num_heads;
-    const int q_col = _temp % num_query;
+    // const int q_col = _temp % num_query;
     _temp /= num_query;
     const int b_col = _temp;
 

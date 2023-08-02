@@ -370,3 +370,53 @@ ppl::common::RetCode PPLCUDATransposeForwardImp(
     }
 #undef SWITCH_CASE
 }
+
+template<typename T>
+__global__ void ppl_cukernel_transpose01(T* out, T* in, const int64_t dim0, const int64_t dim1, const int64_t dim2)
+{
+    int64_t index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (index < dim0 * dim1 * dim2) {
+        const int64_t input_dim2_index = index % dim2;
+        index                      = (index - input_dim2_index) / dim2;
+        const int64_t input_dim1_index = index % dim1;
+        index                      = (index - input_dim1_index) / dim1;
+        const int64_t input_dim0_index = index % dim0;
+
+        out[input_dim1_index * dim0 * dim2 + input_dim0_index * dim2 + input_dim2_index] =
+            in[input_dim0_index * dim1 * dim2 + input_dim1_index * dim2 + input_dim2_index];
+    }
+}
+
+ppl::common::RetCode PPLCUDATranspose01ForwardImp(
+    cudaStream_t stream,
+    const void *input,
+    ppl::common::datatype_t datatype,
+    const int64_t dim0,
+    const int64_t dim1,
+    const int64_t dim2,
+    void *output)
+{
+    dim3 block(512);
+
+    double grid_size = dim0 * dim1 * dim2 / 512.;
+    if (grid_size > UINT32_MAX) {
+        return ppl::common::RC_INVALID_VALUE;
+    }
+    dim3 grid((unsigned int)(ceil(grid_size)));
+
+#define SWITCH_CASE(TYPE)                                                                                                          \
+    case sizeof(TYPE): {                                                                                                           \
+        ppl_cukernel_transpose01<<<grid, block, 0, stream>>>((TYPE *)output, (TYPE *)input, dim0, dim1, dim2);                     \
+        return ppl::common::RC_SUCCESS;                                                                                            \
+    }
+
+    switch (ppl::common::GetSizeOfDataType(datatype)) {
+        SWITCH_CASE(int8_t);
+        SWITCH_CASE(int16_t);
+        SWITCH_CASE(int32_t);
+        SWITCH_CASE(int64_t);
+        default:
+            return ppl::common::RC_UNSUPPORTED;
+    }
+#undef SWITCH_CASE
+}

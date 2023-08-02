@@ -41,4 +41,10 @@
         }                                                     \
     } while (0)
 
+#define PPL_CHECK(COND, ERR)                                    \
+    if(!(COND)) {                                               \
+        std::cerr << "'" #COND "' failed: " << ERR << "\n";     \
+        exit(1);                                                \
+    }
+
 #endif

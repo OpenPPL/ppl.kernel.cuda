@@ -3,40 +3,6 @@
 #include <cuda_fp16.h>
 #include "cudakernel/common/common.cuh"
 
-template <int VPT>
-struct BytesToType;
-
-template <>
-struct BytesToType<2>
-{
-    using type = uint16_t;
-};
-template <>
-struct BytesToType<4>
-{
-    using type = uint32_t;
-};
-template <>
-struct BytesToType<8>
-{
-    using type = uint64_t;
-};
-template <>
-struct BytesToType<16>
-{
-    using type = float4;
-};
-
-template <int Bytes>
-__device__ inline void copy(const void* local, void* data)
-{
-    using T = typename BytesToType<Bytes>::type;
-
-    const T* in = static_cast<const T*>(local);
-    T* out = static_cast<T*>(data);
-    *out = *in;
-}
-
 
 template <int VPT, int TPB>
 __global__ void LayernormForward_fp16(
@@ -44,11 +10,11 @@ __global__ void LayernormForward_fp16(
     const half *weight,
     const half *bias,
     const float eps,
-    const int32_t normalize_shape,
+    const int64_t normalize_shape,
     half *output
 ){
 #if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
-    const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
+    const int64_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
     half inLocal[VPT]; half weightLocal[VPT]; half biasLocal[VPT];
 
     copy<sizeof(half) * VPT>(&x[idx], inLocal);
@@ -100,7 +66,7 @@ __global__ void LayernormForward_fp32(
     const int32_t normalize_shape,
     float *output
 ){
-    const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
+    const int64_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
     float inLocal[VPT]; float weightLocal[VPT]; float biasLocal[VPT];
 
     copy<sizeof(float) * VPT>(&x[idx], inLocal);
@@ -145,13 +111,13 @@ __global__ void LayernormForward_fp32(
 
 __global__ __launch_bounds__(256) void LayernormForwardDefault_fp16(
     const half* input, const half* scale, const half* shift, half* output,
-    int N, bool has_affine, float eps) {
+    int64_t N, bool has_affine, float eps) {
 #if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
     auto cur_in = input + blockIdx.x * N;
     auto cur_out = output + blockIdx.x * N;
     float2 loc = make_float2(0.f, 0.f);
 
-    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x){
+    for(int64_t tid = threadIdx.x; tid < N; tid += blockDim.x){
         float v = __half2float(cur_in[tid]);
         loc.x += v;
         loc.y += v * v;
@@ -169,7 +135,7 @@ __global__ __launch_bounds__(256) void LayernormForwardDefault_fp16(
     half mean_h = __float2half(mean);
     half rstd_h = __float2half(rstd);
 
-    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x) {
+    for(int64_t tid = threadIdx.x; tid < N; tid += blockDim.x) {
         half val = (cur_in[tid] - mean_h) * rstd_h;
         if(has_affine)
             val = val * scale[tid] + shift[tid];
@@ -182,12 +148,12 @@ __global__ __launch_bounds__(256) void LayernormForwardDefault_fp16(
 
 __global__ __launch_bounds__(256) void LayernormForwardDefault_fp32(
     const float* input, const float* scale, const float* shift, float* output,
-    int N, bool has_affine, float eps) {
+    int64_t N, bool has_affine, float eps) {
     auto cur_in = input + blockIdx.x * N;
     auto cur_out = output + blockIdx.x * N;
     float2 loc = make_float2(0.f, 0.f);
 
-    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x){
+    for(int64_t tid = threadIdx.x; tid < N; tid += blockDim.x){
         float v = cur_in[tid];
         loc.x += v;
         loc.y += v * v;
@@ -203,7 +169,7 @@ __global__ __launch_bounds__(256) void LayernormForwardDefault_fp32(
     float mean = loc.x / N;
     float rstd = rsqrtf(loc.y / N - mean * mean + eps);
 
-    for(auto tid = threadIdx.x; tid < N; tid += blockDim.x) {
+    for(int64_t tid = threadIdx.x; tid < N; tid += blockDim.x) {
         float val = (cur_in[tid] - mean) * rstd;
         if(has_affine)
             val = val * scale[tid] + shift[tid];
@@ -214,20 +180,20 @@ __global__ __launch_bounds__(256) void LayernormForwardDefault_fp32(
 
 __global__ __launch_bounds__(256) void ppl_cudakernel_layernorm_int8(
     const char* input, const float* weight, const float* bias, char* output,
-    int outer, int inner, bool has_affine, float eps, float in_scale, float out_scale) {
+    int64_t outer, int64_t inner, bool has_affine, float eps, float in_scale, float out_scale) {
 
     __shared__ float acc_val[256];
-    const int outer_idx = blockIdx.x;
+    const int64_t outer_idx = blockIdx.x;
     const unsigned int tid = threadIdx.x;
 
     //! calculate mean_val
     acc_val[tid] = 0.f;
-    for (int i = tid; i < inner; i += blockDim.x) {
+    for (int64_t i = tid; i < inner; i += blockDim.x) {
         acc_val[tid] += (float)input[outer_idx * inner + i] * in_scale;
     }
     __syncthreads();
 
-    unsigned int i = 1, j = 2;
+    uint64_t i = 1, j = 2;
     while (j <= blockDim.x) {
         if (tid % j == 0) {
             acc_val[tid] += acc_val[tid + i];
@@ -239,7 +205,7 @@ __global__ __launch_bounds__(256) void ppl_cudakernel_layernorm_int8(
     __syncthreads();
 
     acc_val[tid] = 0.f;
-    for (int i = tid; i < inner; i += blockDim.x) {
+    for (int64_t i = tid; i < inner; i += blockDim.x) {
         acc_val[tid] += ((float)input[outer_idx * inner + i] * in_scale - mean_val) * ((float)input[outer_idx * inner + i]  *in_scale - mean_val);
     }
 
@@ -256,7 +222,7 @@ __global__ __launch_bounds__(256) void ppl_cudakernel_layernorm_int8(
     float std = sqrtf(acc_val[0] / inner + eps);
     float r_std = 1.0f / std;
 
-    for (int i=tid; i < inner; i += blockDim.x){
+    for (int64_t i=tid; i < inner; i += blockDim.x){
         float weight_val = 1.0f;  float bias_val=0;
         if (has_affine){
              weight_val = weight[tid];
@@ -277,15 +243,15 @@ ppl::common::RetCode PPLCUDALayerNormForwardImp(
     const void* scale,
     const void* shift,
     void* output,
-    int outer,
-    int inner,
+    int64_t outer,
+    int64_t inner,
     bool elementwise_affine,
     float eps,
     float in_scale,
     float out_scale){
 
     const int64_t norm_size = inner;
-    const int32_t grid_size = outer;
+    const int64_t grid_size = outer;
     if (input_shape->GetDataType() == ppl::common::DATATYPE_FLOAT32) {
         constexpr int32_t VPT = 16 / sizeof(float);
         switch (norm_size)
