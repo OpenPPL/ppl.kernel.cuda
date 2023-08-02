@@ -99,3 +99,25 @@ else()
 endif()
 
 unset(__PPLCOMMON_COMMIT__)
+
+# --------------------------------------------------------------------------- #
+
+set(CUB_ENABLE_HEADER_TESTING OFF CACHE BOOL "")
+set(CUB_ENABLE_TESTING OFF CACHE BOOL "")
+set(CUB_ENABLE_EXAMPLES OFF CACHE BOOL "")
+
+set(__CUB_COMMIT__ 1.12.1)
+
+if(PPL_CUDA_DEP_CUB_PKG)
+    hpcc_declare_pkg_dep(cub
+        ${PPL_CUDA_DEP_CUB_PKG})
+else()
+    if(NOT PPL_CUDA_DEP_CUB_GIT)
+        set(PPL_CUDA_DEP_CUB_GIT "https://github.com/NVIDIA/cub.git")
+    endif()
+    hpcc_declare_git_dep(cub
+        ${PPL_CUDA_DEP_CUB_GIT}
+        ${__CUB_COMMIT__})
+endif()
+
+unset(__CUB_COMMIT__)

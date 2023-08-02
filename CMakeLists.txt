@@ -223,6 +223,9 @@ target_link_libraries(pplkernelcuda_static PUBLIC ${PPLNN_CUDA_TOOLKIT_LINK_LIBR
 hpcc_populate_dep(pplcommon)
 target_link_libraries(pplkernelcuda_static PUBLIC pplcommon_static)
 
+hpcc_populate_dep(cub)
+target_include_directories(pplkernelcuda_static PUBLIC ${cub_SOURCE_DIR})
+
 if(PPLNN_ENABLE_CUDA_JIT)
     target_compile_definitions(pplkernelcuda_static PUBLIC PPLNN_ENABLE_CUDA_JIT)
 endif()
