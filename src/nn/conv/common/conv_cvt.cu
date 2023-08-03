@@ -110,7 +110,7 @@ __global__ void flt_group_padding(T *output, T *input, unsigned int in_size_per_
 }
 
 void PPLCUDAConvolutionCvtFlt(
-    const cudaStream_t stream,
+    cudaStream_t stream,
     void *output,
     const void *input,
     ppl::common::datatype_t type,
@@ -155,7 +155,7 @@ void PPLCUDAConvolutionCvtFlt(
 }
 
 void PPLCUDAConvolutionCvtInput(
-    cudaStream_t &stream,
+    cudaStream_t stream,
     void *output,
     const void *input,
     ppl::common::datatype_t type,
@@ -191,7 +191,7 @@ void PPLCUDAConvolutionCvtInput(
 }
 
 void PPLCUDAConvolutionCvtOutput(
-    cudaStream_t &stream,
+    cudaStream_t stream,
     void *output,
     const void *input,
     ppl::common::datatype_t type,
@@ -231,7 +231,7 @@ void PPLCUDAConvolutionCvtOutput(
 }
 
 void PPLCUDAConvolutionCvtBias(
-    const cudaStream_t stream,
+    cudaStream_t stream,
     void *output,
     const void *input,
     ppl::common::datatype_t type,

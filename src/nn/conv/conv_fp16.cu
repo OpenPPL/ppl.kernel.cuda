@@ -29,6 +29,7 @@
 
 #include "cudakernel/nn/conv/conv_fp16.h"
 #include "cudakernel/nn/conv/gene_kernel.h"
+#include "cudakernel/nn/conv/group_padding.h"
 #include "cudakernel/common/cuda_check.h"
 #include "kernel_type.h"
 #include "conv_common.h"
