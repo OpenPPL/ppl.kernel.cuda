@@ -499,7 +499,7 @@ void ppl_arithmetic_prepare_strides_nhwc(
     uint32_t *stride_out,
     int suppled_channel = 1)
 {
-    if (tensor_shape0->GetDimCount() < 2 || tensor_shape1->GetDimCount() < 2) return;
+    if (tensor_shape_out->GetDimCount() < 2) return;
     ppl::common::TensorShape pad_tensor_shape0 = *tensor_shape0;
     ppl::common::TensorShape pad_tensor_shape1 = *tensor_shape1;
     ppl_pad_tensor_shape(tensor_shape0, tensor_shape1,
@@ -925,8 +925,10 @@ ppl::common::RetCode PPLCUDAArithMeticForwardImp(
         } else {
             int inner_dim = first_shorter ? input_shape0->GetDim(0) : input_shape1->GetDim(0);
             int channel_dim = 1;
-            if (output_shape->GetDataFormat() != ppl::common::DATAFORMAT_NDARRAY)
-                channel_dim = output_shape->GetDim(1) + output_shape->GetPadding0(1) + output_shape->GetPadding1(1);
+            //TODO(WJF): confused with "channel_dim": according to onnx-broadcast rule, input A(m,n) and B(n), output C(m, n) 
+            // so there is no need to divide by channel_dim when caculating shorter_index
+            // if (output_shape->GetDataFormat() != ppl::common::DATAFORMAT_NDARRAY)
+                // channel_dim = output_shape->GetDim(1) + output_shape->GetPadding0(1) + output_shape->GetPadding1(1);
             ppl_cukernel_arithmetic_one_dimension<op_type, T><<<grid_size, block_size, 0,
                 stream>>>(num_elems, inner_dim, channel_dim, first_shorter, (const T*)input0, (const T*)input1, (T*)output);
         }
