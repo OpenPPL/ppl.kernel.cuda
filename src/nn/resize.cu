@@ -647,6 +647,18 @@ __global__ void ppl_cukernel_resize_cubic_int8(
     }
 }
 
+static int GetVectorizeSize(int channels, int channels_per_piece) {
+    int vec_size = 0;
+    if (channels % 8 == 0 && channels_per_piece % 8 == 0) {
+        vec_size = 3;
+    } else if (channels % 4 == 0 && channels_per_piece % 4 == 0) {
+        vec_size = 2;
+    } else if (channels % 2 == 0 && channels_per_piece % 2 == 0) {
+        vec_size = 1;
+    }
+    return vec_size;
+}
+
 template <typename T>
 __global__ void ppl_cukernel_resize_cubic_nhwc(
     int num_threads,
@@ -880,8 +892,24 @@ ppl::common::RetCode ppl_resize_forward_nhwc(
     GetNumBlocks(block_size, grid_size, channels_per_piece, num_threads, channels);
     grid_size.z =  output_shape->GetDim(0);
     if (inter_mode == 0) {
-        ppl_cukernel_resize_nearest_nhwc<T><<<grid_size, block_size, 0, stream>>>(
-            num_threads, h_scale, w_scale, channels, pad_channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, transform_mode);
+        int vec_size = GetVectorizeSize(channels, channels_per_piece);
+        static_assert(sizeof(T) == sizeof(half), "resize nearest vectorize only support half now!");
+        if (vec_size == 3) {
+            using VEC_TYPE = float4;
+            ppl_cukernel_resize_nearest_nhwc<VEC_TYPE><<<grid_size, block_size, 0, stream>>>(
+                num_threads, h_scale, w_scale, channels >> vec_size, pad_channels >> vec_size, channels_per_piece >> vec_size, (const VEC_TYPE*)input, in_height, in_width, (VEC_TYPE*)output, out_height, out_width, transform_mode);
+        } else if (vec_size == 2) {
+            using VEC_TYPE = float2;
+            ppl_cukernel_resize_nearest_nhwc<VEC_TYPE><<<grid_size, block_size, 0, stream>>>(
+                num_threads, h_scale, w_scale, channels >> vec_size, pad_channels >> vec_size, channels_per_piece >> vec_size, (const VEC_TYPE*)input, in_height, in_width, (VEC_TYPE*)output, out_height, out_width, transform_mode);
+        } else if (vec_size == 2) {
+            using VEC_TYPE = float;
+            ppl_cukernel_resize_nearest_nhwc<VEC_TYPE><<<grid_size, block_size, 0, stream>>>(
+                num_threads, h_scale, w_scale, channels >> vec_size, pad_channels >> vec_size, channels_per_piece >> vec_size, (const VEC_TYPE*)input, in_height, in_width, (VEC_TYPE*)output, out_height, out_width, transform_mode);
+        } else {
+            ppl_cukernel_resize_nearest_nhwc<T><<<grid_size, block_size, 0, stream>>>(
+                num_threads, h_scale, w_scale, channels >> vec_size, pad_channels >> vec_size, channels_per_piece >> vec_size, input, in_height, in_width, output, out_height, out_width, transform_mode);
+        }
     } else if (inter_mode == 1) {
         ppl_cukernel_resize_bilinear_nhwc<T><<<grid_size, block_size, 0, stream>>>(
             num_threads, h_scale, w_scale, channels, pad_channels, channels_per_piece, input, in_height, in_width, output, out_height, out_width, transform_mode);

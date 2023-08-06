@@ -27,7 +27,7 @@ __global__ void ppl_cukernel_pooling_ave_global_shuffle(
       int pad_channels,
       int HW)
 {
-    int c  = (blockIdx.y * blockDim.y + threadIdx.y);
+    int c  = (blockIdx.x * blockDim.y + threadIdx.y);
     int bc = blockIdx.z * pad_channels + c;
     if (c >= pad_channels)
         return;
@@ -339,13 +339,14 @@ ppl::common::RetCode PPLCUDAGlobalAvePoolingForwardImpFp32(
     int batch        = output_shape->GetDim(0);
     int pad_channels = output_shape->GetDim(1) + output_shape->GetPadding1(1);
     int in_height    = input_shape->GetDim(2);
-    int in_width     = input_shape->GetDim(3);
+    int in_width = 1;
+    if (input_shape->GetDimCount() > 3) in_width = input_shape->GetDim(3);
 
     dim3 dim_block(32, 4, 1);
     dim3 dim_grid(1, 1, batch);
 
     if (output_shape->GetDataFormat() == ppl::common::DATAFORMAT_NDARRAY) {
-        dim_grid.y = (pad_channels + dim_block.y - 1) / dim_block.y;
+        dim_grid.x = (pad_channels + dim_block.y - 1) / dim_block.y;
         ppl_cukernel_pooling_ave_global_shuffle<float><<<dim_grid, dim_block,
             0, stream>>>((const float*)input, (float*)output, batch, pad_channels,
             in_height * in_width);
