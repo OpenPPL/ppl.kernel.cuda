@@ -209,7 +209,6 @@ endif()
 # ----------------------------------------------------------------------------------------------- #
 
 add_library(pplkernelcuda_static STATIC ${PPLNN_CUDA_SOURCES} ${PPLNN_CUDA_EXTERNAL_SOURCES})
-target_compile_features(pplkernelcuda_static PRIVATE cxx_std_11)
 
 target_include_directories(pplkernelcuda_static PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/include
