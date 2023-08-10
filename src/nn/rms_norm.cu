@@ -3,7 +3,7 @@
 #include "cudakernel/common/cuda_check.h"
 #include "cudakernel/common/common.cuh"
 #include <cuda_fp16.h>
-# include <cub/cub.cuh>
+#include <cub/cub.cuh>
 
 /**
  * RMSNorm Cuda impl template.
@@ -40,10 +40,12 @@ void _RmsNormForward_fp16(
     accumulator = accumulator + (__half2float(inLocal[it]) * __half2float(inLocal[it]));
   copy<sizeof(half) * VPT>(&weight[threadIdx.x * VPT], weightLocal);
 
-  using BlockReduce = cub::BlockReduce<float, TPB>;
-  __shared__ typename BlockReduce::TempStorage tempStorage;
+  #if (__CUDACC_VER_MAJOR__ >= 11)
+      const float reduced = BlockAllReduce<SumOp, float, TPB>(accumulator) * r_normalize_shape;
+  #else
+      const float reduced = blockReduceSum<float>(accumulator) * r_normalize_shape;
+  #endif
   __shared__ float r_reduced;
-  const float reduced = BlockReduce(tempStorage).Reduce(accumulator, cub::Sum()) * r_normalize_shape;
 
   if (threadIdx.x == 0)
     r_reduced = rsqrt(reduced + eps);
@@ -108,10 +110,12 @@ void _SkipRmsNormForward_fp16(
     accumulator = accumulator + (inLocal_fp32[it] * inLocal_fp32[it]);
   copy<sizeof(half) * VPT>(&weight[threadIdx.x * VPT], weightLocal);
 
-  using BlockReduce = cub::BlockReduce<float, TPB>;
-  __shared__ typename BlockReduce::TempStorage tempStorage;
+  #if (__CUDACC_VER_MAJOR__ >= 11)
+      const float reduced = BlockAllReduce<SumOp, float, TPB>(accumulator) * r_normalize_shape;
+  #else
+      const float reduced = blockReduceSum<float>(accumulator) * r_normalize_shape;
+  #endif
   __shared__ float r_reduced;
-  const float reduced = BlockReduce(tempStorage).Reduce(accumulator, cub::Sum()) * r_normalize_shape;
 
   if (threadIdx.x == 0)
     r_reduced = rsqrt(reduced + eps);
