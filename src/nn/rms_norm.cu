@@ -3,7 +3,6 @@
 #include "cudakernel/common/cuda_check.h"
 #include "cudakernel/common/common.cuh"
 #include <cuda_fp16.h>
-#include <cub/cub.cuh>
 
 /**
  * RMSNorm Cuda impl template.
