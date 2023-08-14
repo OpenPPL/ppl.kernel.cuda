@@ -37,7 +37,7 @@ include(FetchContent)
 set(FETCHCONTENT_BASE_DIR ${HPCC_DEPS_DIR})
 set(FETCHCONTENT_QUIET OFF)
 
-if(PPLNNX86Kernel_HOLD_DEPS)
+if(PPLNN_HOLD_DEPS)
     set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 endif()
 
@@ -78,13 +78,21 @@ endif()
 
 # --------------------------------------------------------------------------- #
 
-set(PPLCOMMON_HOLD_DEPS ${PPLNN_HOLD_DEPS})
+if(PPLNN_HOLD_DEPS)
+    set(PPLCOMMON_HOLD_DEPS ON)
+endif()
 
 set(__PPLCOMMON_COMMIT__ master)
 
-set(PPLCOMMON_USE_X86_64 ${PPLNN_USE_X86_64})
-set(PPLCOMMON_USE_AARCH64 ${PPLNN_USE_AARCH64})
-set(PPLCOMMON_USE_CUDA ${PPLNN_USE_CUDA})
+if(PPLNN_USE_X86_64)
+    set(PPLCOMMON_USE_X86_64 ON)
+endif()
+if(PPLNN_USE_AARCH64)
+    set(PPLCOMMON_USE_AARCH64 ON)
+endif()
+if(PPLNN_USE_CUDA)
+    set(PPLCOMMON_USE_CUDA ON)
+endif()
 
 if(PPLNN_DEP_PPLCOMMON_PKG)
     hpcc_declare_pkg_dep(pplcommon
