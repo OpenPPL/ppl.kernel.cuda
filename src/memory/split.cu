@@ -23,6 +23,9 @@
 #include "ppl/common/retcode.h"
 #include <cuda_runtime.h>
 
+#include "cudakernel/common/common.cuh"
+#include <cuda_fp16.h>
+
 #define NHWC8_ALIGNED_AXIS (8)
 
 template <typename T1, typename T2>
@@ -204,4 +207,79 @@ ppl::common::RetCode PPLCUDASplitForwardImp(
     } else {
         return ppl::common::RC_UNSUPPORTED;
     }
+}
+
+template<typename T, int TPB, int VPT>
+__global__ void ppl_cukernel_aligned_split3_kernel(
+    const T* input, int64_t input_dim,
+    T* out0, int64_t out0_dim,
+    T* out1, int64_t out1_dim,
+    T* out2, int64_t out2_dim)
+{
+    const int64_t idx = (blockIdx.y * TPB + threadIdx.x) * VPT;
+    auto cur_input = input + blockIdx.x * input_dim;
+    T local[VPT];
+    if(idx < out0_dim) {
+        const int64_t real_idx = idx;
+        auto cur_out0 = out0 + blockIdx.x * out0_dim;
+        copy<sizeof(T) * VPT>(&cur_input[idx], local);
+        copy<sizeof(T) * VPT>(local, &cur_out0[real_idx]);
+    } else if (idx < out0_dim + out1_dim) {
+        const int64_t real_idx = idx - out0_dim;
+        auto cur_out1 = out1 + blockIdx.x * out1_dim;
+        copy<sizeof(T) * VPT>(&cur_input[idx], local);
+        copy<sizeof(T) * VPT>(local, &cur_out1[real_idx]);
+    } else if (idx < out0_dim + out1_dim + out2_dim) {
+        const int64_t real_idx = idx - out0_dim - out1_dim;
+        auto cur_out2 = out2 + blockIdx.x * out2_dim;
+        copy<sizeof(T) * VPT>(&cur_input[idx], local);
+        copy<sizeof(T) * VPT>(local, &cur_out2[real_idx]);
+    }
+}
+
+ppl::common::RetCode PPLCUDAAlignedSplit3ForwardImp(
+    cudaStream_t stream,
+    const ppl::common::TensorShape* input_shape,
+    const void* input,
+    int32_t split_axis,
+    const ppl::common::TensorShape* output0_shape,
+    void* output0,
+    const ppl::common::TensorShape* output1_shape,
+    void* output1,
+    const ppl::common::TensorShape* output2_shape,
+    void* output2)
+{
+
+    if (input_shape->GetDataType() != ppl::common::DATATYPE_FLOAT16) {
+        return ppl::common::RC_UNSUPPORTED;
+    }
+
+    const int64_t VPT = 16 / sizeof(half);
+    const int64_t TPB = 256;
+
+    const int64_t outer_dim = input_shape->CalcElementsToDimensionExcludingPadding(split_axis);
+    const int64_t inner_dim = input_shape->CalcElementsFromDimensionExcludingPadding(split_axis + 1);
+    const int64_t input_dim = input_shape->GetDim(split_axis) * inner_dim;
+    const int64_t out0_dim = output0_shape->GetDim(split_axis) * inner_dim;
+    const int64_t out1_dim = output1_shape->GetDim(split_axis) * inner_dim;
+    const int64_t out2_dim = output2_shape->GetDim(split_axis) * inner_dim;
+
+    const bool out0_aligned = (out0_dim / VPT * VPT == out0_dim);
+    const bool out1_aligned = (out1_dim / VPT * VPT == out1_dim);
+    const bool out2_aligned = (out2_dim / VPT * VPT == out2_dim);
+
+    if (!out0_aligned || !out1_aligned || !out2_aligned) {
+        return ppl::common::RC_UNSUPPORTED;
+    }
+
+    const int64_t total_out_dim = out0_dim + out1_dim + out2_dim;
+    dim3 grid_size = {(unsigned int)outer_dim, (unsigned int)ceilf(total_out_dim / (VPT * TPB)), 1};
+
+    ppl_cukernel_aligned_split3_kernel<half, TPB, VPT><<<grid_size, TPB, 0, stream>>>(
+        (half*)input, input_dim,
+        (half*)output0, out0_dim,
+        (half*)output1, out1_dim,
+        (half*)output2, out2_dim);
+
+    return ppl::common::RC_SUCCESS;
 }

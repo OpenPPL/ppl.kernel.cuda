@@ -30,4 +30,16 @@ ppl::common::RetCode PPLCUDASplitForwardImp(
     const int64_t* out_dims[],
     void* output[]);
 
+ppl::common::RetCode PPLCUDAAlignedSplit3ForwardImp(
+    cudaStream_t stream,
+    const ppl::common::TensorShape* input_shape,
+    const void* input,
+    int32_t split_axis,
+    const ppl::common::TensorShape* output0_shape,
+    void* output0,
+    const ppl::common::TensorShape* output1_shape,
+    void* output1,
+    const ppl::common::TensorShape* output2_shape_optional,
+    void* output2_optional);
+
 #endif // PPLCUDA_KERNEL_INCLUDE_SPLIT_SPLIT_H_
