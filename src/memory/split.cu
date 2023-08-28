@@ -273,7 +273,7 @@ ppl::common::RetCode PPLCUDAAlignedSplit3ForwardImp(
     }
 
     const int64_t total_out_dim = out0_dim + out1_dim + out2_dim;
-    dim3 grid_size = {(unsigned int)outer_dim, (unsigned int)ceilf(total_out_dim / (VPT * TPB)), 1};
+    dim3 grid_size = {(unsigned int)outer_dim, (unsigned int)ceilf(float(total_out_dim) / (VPT * TPB)), 1};
 
     ppl_cukernel_aligned_split3_kernel<half, TPB, VPT><<<grid_size, TPB, 0, stream>>>(
         (half*)input, input_dim,
