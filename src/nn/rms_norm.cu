@@ -59,6 +59,45 @@ void _RmsNormForward_fp16(
 };
 
 
+template <int TPB>
+__global__
+void _RmsNormForward_fp16_default(
+  const half *x,
+  const half *weight,
+  const float eps,
+  const int32_t normalize_shape,
+  half *o1,
+  half *o2
+){
+  auto cur_x = x + normalize_shape * blockIdx.x;
+  auto cur_o1 = o1 + normalize_shape * blockIdx.x;
+  auto cur_o2 = o2 + normalize_shape * blockIdx.x;
+
+  float accumulator = 0.0f; // accumulator
+  float r_normalize_shape = 1.0f / (float)(normalize_shape);
+
+  for(int idx = threadIdx.x; idx < normalize_shape; idx += TPB) {
+    cur_o2[idx] = cur_x[idx];
+    accumulator = accumulator + (__half2float(cur_x[idx]) * __half2float(cur_x[idx]));
+  }
+
+  #if (__CUDACC_VER_MAJOR__ >= 11)
+      const float reduced = BlockAllReduce<SumOp, float, TPB>(accumulator) * r_normalize_shape;
+  #else
+      const float reduced = blockReduceSum<float>(accumulator) * r_normalize_shape;
+  #endif
+  __shared__ float r_reduced;
+
+  if (threadIdx.x == 0)
+    r_reduced = rsqrt(reduced + eps);
+  __syncthreads();
+
+  for(int idx = threadIdx.x; idx < normalize_shape; idx += TPB) {
+    cur_o1[idx] = __float2half(__half2float(cur_x[idx]) * r_reduced) * weight[idx];
+  }
+};
+
+
 /**
  * RMSNorm Cuda impl template(with skip connection).
  *
@@ -130,6 +169,52 @@ void _SkipRmsNormForward_fp16(
 
 
 
+ template <int TPB>
+__global__
+void _SkipRmsNormForward_fp16_default(
+  const half *x,
+  const half *weight,
+  const half *skip,
+  const float eps,
+  const int32_t normalize_shape,
+  half *o1,
+  half *o2
+){
+  auto cur_x = x + normalize_shape * blockIdx.x;
+  auto cur_skip = skip + normalize_shape * blockIdx.x;
+  auto cur_o1 = o1 + normalize_shape * blockIdx.x;
+  auto cur_o2 = o2 + normalize_shape * blockIdx.x;
+
+  float accumulator = 0.0f; // accumulator
+  float r_normalize_shape = 1.0f / (float)(normalize_shape);
+
+// step 1. compute x + skip
+
+  for(int idx = threadIdx.x; idx < normalize_shape; idx += TPB) {
+    half temp = cur_x[idx] + cur_skip[idx];
+    cur_o2[idx] = temp;
+    accumulator = accumulator + (__half2float(temp) * __half2float(temp));
+  }
+
+  #if (__CUDACC_VER_MAJOR__ >= 11)
+      const float reduced = BlockAllReduce<SumOp, float, TPB>(accumulator) * r_normalize_shape;
+  #else
+      const float reduced = blockReduceSum<float>(accumulator) * r_normalize_shape;
+  #endif
+  __shared__ float r_reduced;
+
+  if (threadIdx.x == 0)
+    r_reduced = rsqrt(reduced + eps);
+  __syncthreads();
+
+  for(int idx = threadIdx.x; idx < normalize_shape; idx += TPB) {
+    float temp = __half2float(cur_x[idx] + cur_skip[idx]);
+    cur_o1[idx] = __float2half(temp * r_reduced) * weight[idx];
+  }
+};
+
+
+
 ppl::common::RetCode PPLCUDARmsNormForwardImp(
     cudaStream_t stream,
     const void* input,
@@ -197,7 +282,13 @@ ppl::common::RetCode PPLCUDARmsNormForwardImp(
           (half*)(output2));
         break;
       default:
-        PPL_CHECK(false, "RMSNorm not support this shape");
+        _RmsNormForward_fp16_default<512>
+        <<<grid_size, 512, 0, stream>>>(
+          (half*)(input), 
+          (half*)(weight), 
+          eps, normalize_shape, 
+          (half*)(output1),
+          (half*)(output2));
       };
     } else {
       switch (normalize_shape)
@@ -253,7 +344,14 @@ ppl::common::RetCode PPLCUDARmsNormForwardImp(
             (half*)(output2));
         break;
       default:
-        PPL_CHECK(false, "RMSNorm not support this shape");
+        _SkipRmsNormForward_fp16_default<512>
+          <<<grid_size, 512, 0, stream>>>(
+            (half*)(input), 
+            (half*)(weight), 
+            (half*)(skip), 
+            eps, normalize_shape, 
+            (half*)(output1),
+            (half*)(output2));
       };
     }
     
