@@ -827,7 +827,8 @@ ppl::common::RetCode ppl_resize_forward(
     int channels = output_shape->GetDim(0) * output_shape->GetDim(1);
 
     float h_scale = 0.f, w_scale = 0.f;
-    if (scale_pre_set) {
+    bool use_scale_pre_set = (transform_mode != 2) && (transform_mode != 5);
+    if (use_scale_pre_set && scale_pre_set) {
         h_scale = h_scale_pre;
         w_scale = w_scale_pre;
     } else {
