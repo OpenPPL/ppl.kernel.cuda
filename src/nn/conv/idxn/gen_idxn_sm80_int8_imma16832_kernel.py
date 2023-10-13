@@ -261,7 +261,7 @@ class HashFile:
     def Close(self):
         self.f.close()
 
-def GenAllKernels(parent_path, kernel_cut=False):
+def GenAllKernels(parent_path, kernel_cut=False, disable_fp16=False):
     idx_header_file = IdxHeaderFile(parent_path)
     idx_source_file = IdxSourceFile(parent_path)
 
@@ -287,12 +287,25 @@ def GenAllKernels(parent_path, kernel_cut=False):
         cta_y_num_l = [1, 2, 4]
         cta_x_num_l = [1, 2, 4]
 
+    gen_one_kernel = False
     for s_size in s_size_l:
+        if disable_fp16 and gen_one_kernel:
+            break
         for k_num in k_num_l:
+            if disable_fp16 and gen_one_kernel:
+                break
             for warp_y in warp_y_l:
+                if disable_fp16 and gen_one_kernel:
+                    break
                 for warp_x in warp_x_l:
+                    if disable_fp16 and gen_one_kernel:
+                        break
                     for cta_y_num in cta_y_num_l:
+                        if disable_fp16 and gen_one_kernel:
+                            break
                         for cta_x_num in cta_x_num_l:
+                            if disable_fp16 and gen_one_kernel:
+                                break
                             if cta_y_num == 4 and cta_x_num == 4:
                                 continue
                             if warp_y == 128 and warp_x == 64:
@@ -307,6 +320,7 @@ def GenAllKernels(parent_path, kernel_cut=False):
                                 idx_source_file.AppendKernel(kernel.fname)
 
                                 init_file.AppendKernel(s_size, kernel.kname)
+                                gen_one_kernel = True
 
     idx_header_file.Close()
     idx_source_file.Close()
@@ -314,12 +328,13 @@ def GenAllKernels(parent_path, kernel_cut=False):
     init_file.Close()
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 4:
         print(__doc__)
         sys.exit(1)
 
     path = sys.argv[1]
     kernel_cut = True if sys.argv[2] == "ON" else False
+    disable_fp16 = True if sys.argv[3] == "ON" else False
 
     if not os.path.exists(path):
         os.makedirs(path)
@@ -328,7 +343,7 @@ if __name__ == '__main__':
 
     if not hash_file.CheckFileExist() or not hash_file.CompareWithPreviousHash():
 
-        GenAllKernels(path, kernel_cut)
+        GenAllKernels(path, kernel_cut, disable_fp16)
 
         hash_file.WriteCurrentHash()
 
