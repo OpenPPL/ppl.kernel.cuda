@@ -27,6 +27,7 @@ void _RmsNormForward_fp16(
   half *o1,
   half *o2
 ){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
   const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
   half inLocal[VPT]; half weightLocal[VPT];
 
@@ -56,6 +57,7 @@ void _RmsNormForward_fp16(
     outLocal[it] = __float2half(__half2float(inLocal[it]) * r_reduced) * weightLocal[it];
   copy<sizeof(half) * VPT>(outLocal, &o1[idx]);
   copy<sizeof(half) * VPT>(inLocal, &o2[idx]);
+#endif
 };
 
 
@@ -69,6 +71,7 @@ void _RmsNormForward_fp16_default(
   half *o1,
   half *o2
 ){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
   auto cur_x = x + normalize_shape * blockIdx.x;
   auto cur_o1 = o1 + normalize_shape * blockIdx.x;
   auto cur_o2 = o2 + normalize_shape * blockIdx.x;
@@ -95,6 +98,7 @@ void _RmsNormForward_fp16_default(
   for(int idx = threadIdx.x; idx < normalize_shape; idx += TPB) {
     cur_o1[idx] = __float2half(__half2float(cur_x[idx]) * r_reduced) * weight[idx];
   }
+#endif
 };
 
 
@@ -123,6 +127,7 @@ void _SkipRmsNormForward_fp16(
   half *o1,
   half *o2
 ){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
   const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
   half inLocal[VPT]; half weightLocal[VPT];
   float inLocal_fp32[VPT];
@@ -165,6 +170,7 @@ void _SkipRmsNormForward_fp16(
     outLocal[it] = __float2half(inLocal_fp32[it] * r_reduced) * weightLocal[it];
   
   copy<sizeof(half) * VPT>(outLocal, &o1[idx]);
+#endif
 };
 
 
@@ -180,6 +186,7 @@ void _SkipRmsNormForward_fp16_default(
   half *o1,
   half *o2
 ){
+#if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
   auto cur_x = x + normalize_shape * blockIdx.x;
   auto cur_skip = skip + normalize_shape * blockIdx.x;
   auto cur_o1 = o1 + normalize_shape * blockIdx.x;
@@ -211,6 +218,7 @@ void _SkipRmsNormForward_fp16_default(
     float temp = __half2float(cur_x[idx] + cur_skip[idx]);
     cur_o1[idx] = __float2half(temp * r_reduced) * weight[idx];
   }
+#endif
 };
 
 
