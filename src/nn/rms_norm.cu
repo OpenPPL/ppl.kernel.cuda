@@ -23,12 +23,12 @@ void _RmsNormForward_fp16(
   const half *x,
   const half *weight,
   const float eps,
-  const int32_t normalize_shape,
+  const int64_t normalize_shape,
   half *o1,
   half *o2
 ){
 #if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
-  const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
+  const int64_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
   half inLocal[VPT]; half weightLocal[VPT];
 
   copy<sizeof(half) * VPT>(&x[idx], inLocal);
@@ -67,7 +67,7 @@ void _RmsNormForward_fp16_default(
   const half *x,
   const half *weight,
   const float eps,
-  const int32_t normalize_shape,
+  const int64_t normalize_shape,
   half *o1,
   half *o2
 ){
@@ -123,12 +123,12 @@ void _SkipRmsNormForward_fp16(
   const half *weight,
   const half *skip,
   const float eps,
-  const int32_t normalize_shape,
+  const int64_t normalize_shape,
   half *o1,
   half *o2
 ){
 #if __CUDA_ARCH__ >= 600 && __CUDACC_VER_MAJOR__ >= 9
-  const int32_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
+  const int64_t idx = normalize_shape * blockIdx.x + threadIdx.x * VPT;
   half inLocal[VPT]; half weightLocal[VPT];
   float inLocal_fp32[VPT];
 
@@ -182,7 +182,7 @@ void _SkipRmsNormForward_fp16_default(
   const half *weight,
   const half *skip,
   const float eps,
-  const int32_t normalize_shape,
+  const int64_t normalize_shape,
   half *o1,
   half *o2
 ){
