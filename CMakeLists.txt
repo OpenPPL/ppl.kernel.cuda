@@ -9,6 +9,7 @@ endif()
 # ---------------------------------------------------------------------------------------- #
 option(PPLNN_CUDA_ENABLE_KERNEL_CUT "" ON)
 option(PPLNN_CUDA_DISABLE_CONV_FP16 "" OFF)
+option(PPLNN_CUDA_DISABLE_CONV_ALL "" OFF)
 
 # dependencies
 include(cmake/deps.cmake)
@@ -27,77 +28,79 @@ if(PPLKERNEL_CUDA_USE_MSVC_STATIC_RUNTIME)
     hpcc_cuda_use_msvc_static_runtime()
 endif()
 
-if(PPLNN_ENABLE_CUDA_JIT)
-    message(STATUS ${CMAKE_CURRENT_BINARY_DIR})
-    execute_process(
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/gene_header.py ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv ${CMAKE_CURRENT_BINARY_DIR}
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-    set(__gene_kernel_src__ ${CMAKE_CURRENT_BINARY_DIR}/gene_header.cc src/nn/conv/gene_kernel.cc)
-    if(CMAKE_COMPILER_IS_GNUCC)
-        set_source_files_properties(${__gene_kernel_src__} PROPERTIES COMPILE_FLAGS -Werror=non-virtual-dtor)
-    endif()
-    list(APPEND PPLNN_CUDA_KERNEL_CPU_SRC ${__gene_kernel_src__})
-    unset(__gene_kernel_src__)
-else()
-    if(CUDA_VERSION VERSION_GREATER_EQUAL "10.2")
+if(NOT PPLNN_CUDA_DISABLE_CONV_ALL)
+    if(PPLNN_ENABLE_CUDA_JIT)
+        message(STATUS ${CMAKE_CURRENT_BINARY_DIR})
         execute_process(
-            # sm75 kernels
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm75_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm75_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm75_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm75_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm75_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm75_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/gene_header.py ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv ${CMAKE_CURRENT_BINARY_DIR}
             OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-        file(GLOB_RECURSE __SM75_CONV_SRC__
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/*/*/idxn_kernels.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/*/*/f*_kernels.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/*/*/f*_kernels*.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/*/*/init*.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/*/*/init*.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/*/*/init*.cu)
-        list(APPEND PPLNN_CUDA_KERNEL_SM75_SRC ${__SM75_CONV_SRC__})
-        unset(__SM75_CONV_SRC__)
-    endif()
+        set(__gene_kernel_src__ ${CMAKE_CURRENT_BINARY_DIR}/gene_header.cc src/nn/conv/gene_kernel.cc)
+        if(CMAKE_COMPILER_IS_GNUCC)
+            set_source_files_properties(${__gene_kernel_src__} PROPERTIES COMPILE_FLAGS -Werror=non-virtual-dtor)
+        endif()
+        list(APPEND PPLNN_CUDA_KERNEL_CPU_SRC ${__gene_kernel_src__})
+        unset(__gene_kernel_src__)
+    else()
+        if(CUDA_VERSION VERSION_GREATER_EQUAL "10.2")
+            execute_process(
+                # sm75 kernels
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm75_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm75_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm75_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
 
-    if(CUDA_VERSION VERSION_GREATER_EQUAL "11.0")
-        execute_process(
-            # sm80 kernels
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm75_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm75_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm75_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
 
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_fp16_hmma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/fp16/hmma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm80_fp16_hmma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/fp16/hmma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_fp16_hmma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/fp16/hmma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-            # int8
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+            file(GLOB_RECURSE __SM75_CONV_SRC__
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/*/*/idxn_kernels.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/*/*/f*_kernels.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/*/*/f*_kernels*.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm75/*/*/init*.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm75/*/*/init*.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm75/*/*/init*.cu)
+            list(APPEND PPLNN_CUDA_KERNEL_SM75_SRC ${__SM75_CONV_SRC__})
+            unset(__SM75_CONV_SRC__)
+        endif()
 
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_int8_imma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/int8/imma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm80_int8_imma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/int8/imma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_int8_imma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/int8/imma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+        if(CUDA_VERSION VERSION_GREATER_EQUAL "11.0")
+            execute_process(
+                # sm80 kernels
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_fp16_hmma1688_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/fp16/hmma1688 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
 
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_int8_imma16832_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/int8/imma16832 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm80_int8_imma16832_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/int8/imma16832 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_int8_imma16832_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/int8/imma16832 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_fp16_hmma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/fp16/hmma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm80_fp16_hmma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/fp16/hmma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_fp16_hmma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/fp16/hmma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
 
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
+                # int8
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_int8_imma8816_kernel.py  ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/int8/imma8816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
 
-        file(GLOB_RECURSE __SM80_CONV_SRC__
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/*/*/idxn_kernels.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/*/*/f*_kernels.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/*/*/f*_kernels*.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/*/*/init*.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/*/*/init*.cu
-            ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/*/*/init*.cu)
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_int8_imma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/int8/imma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm80_int8_imma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/int8/imma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_int8_imma16816_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/int8/imma16816 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
 
-        list(APPEND PPLNN_CUDA_KERNEL_SM80_SRC ${__SM80_CONV_SRC__})
-        unset(__SM80_CONV_SRC__)
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/2spk/gen_2spk_sm80_int8_imma16832_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/int8/imma16832 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/idxn/gen_idxn_sm80_int8_imma16832_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/int8/imma16832 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/conv/swzl/gen_swzl_sm80_int8_imma16832_kernel.py ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/int8/imma16832 ${PPLNN_CUDA_ENABLE_KERNEL_CUT} ${PPLNN_CUDA_DISABLE_CONV_FP16}
+
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+            file(GLOB_RECURSE __SM80_CONV_SRC__
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/*/*/idxn_kernels.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/*/*/f*_kernels.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/*/*/f*_kernels*.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/idxn/sm80/*/*/init*.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/2spk/sm80/*/*/init*.cu
+                ${CMAKE_CURRENT_BINARY_DIR}/conv/swzl/sm80/*/*/init*.cu)
+
+            list(APPEND PPLNN_CUDA_KERNEL_SM80_SRC ${__SM80_CONV_SRC__})
+            unset(__SM80_CONV_SRC__)
+        endif()
     endif()
 endif()
 
