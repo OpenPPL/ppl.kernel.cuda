@@ -48,7 +48,9 @@ if(NOT Git_FOUND)
     message(FATAL_ERROR "git is required.")
 endif()
 
-set(__HPCC_COMMIT__ master)
+if(NOT PPLNN_DEP_HPCC_VERSION)
+    set(PPLNN_DEP_HPCC_VERSION master)
+endif()
 
 if(PPLNN_DEP_HPCC_PKG)
     FetchContent_Declare(hpcc
@@ -62,13 +64,11 @@ else()
     endif()
     FetchContent_Declare(hpcc
         GIT_REPOSITORY ${PPLNN_DEP_HPCC_GIT}
-        GIT_TAG ${__HPCC_COMMIT__}
+        GIT_TAG ${PPLNN_DEP_HPCC_VERSION}
         SOURCE_DIR ${HPCC_DEPS_DIR}/hpcc
         BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/hpcc-build
         SUBBUILD_DIR ${HPCC_DEPS_DIR}/hpcc-subbuild)
 endif()
-
-unset(__HPCC_COMMIT__)
 
 FetchContent_GetProperties(hpcc)
 if(NOT hpcc_POPULATED)
@@ -82,7 +82,9 @@ if(PPLNN_HOLD_DEPS)
     set(PPLCOMMON_HOLD_DEPS ON)
 endif()
 
-set(__PPLCOMMON_COMMIT__ master)
+if(NOT PPLNN_DEP_PPLCOMMON_VERSION)
+    set(PPLNN_DEP_PPLCOMMON_VERSION master)
+endif()
 
 if(PPLNN_USE_X86_64)
     set(PPLCOMMON_USE_X86_64 ON)
@@ -103,9 +105,5 @@ else()
     endif()
     hpcc_declare_git_dep(pplcommon
         ${PPLNN_DEP_PPLCOMMON_GIT}
-        ${__PPLCOMMON_COMMIT__})
+        ${PPLNN_DEP_PPLCOMMON_VERSION})
 endif()
-
-unset(__PPLCOMMON_COMMIT__)
-
-# --------------------------------------------------------------------------- #
