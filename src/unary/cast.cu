@@ -82,10 +82,6 @@ ppl::common::RetCode PPLCUDACastForwardImp(
     int to_)
 {
     uint64_t num_elems                  = output_shape->CalcElementsIncludingPadding();
-    int channels                        = output_shape->GetDim(1);
-    int pad_channels                    = output_shape->GetDim(1) + output_shape->GetPadding1(1);
-    int height                          = output_shape->GetDim(2);
-    int width                           = output_shape->GetDim(3);
     int block_size                      = 256;
     uint64_t grid_size                  = (num_elems + block_size - 1) / block_size;
     const ppl::common::datatype_t in_t  = input_shape->GetDataType();
