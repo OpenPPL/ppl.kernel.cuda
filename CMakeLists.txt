@@ -260,6 +260,10 @@ if(PPLNN_CUDA_ENABLE_KERNEL_CUT)
     target_compile_definitions(pplkernelcuda_static PUBLIC PPLNN_CUDA_ENABLE_KERNEL_CUT)
 endif()
 
+if(PPLNN_CUDA_BINARY_DEFINITIONS)
+    target_compile_definitions(pplkernelcuda_static PUBLIC ${PPLNN_CUDA_BINARY_DEFINITIONS})
+endif()
+
 if(PPLNN_INSTALL)
     install(TARGETS pplkernelcuda_static DESTINATION lib)
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/cudakernel DESTINATION include)
